@@ -11,9 +11,10 @@ See `docs/ARCHITECTURE.md` for the design analysis and migration plan.
 
 - HTTP API at `:8000` covering projects, scope rules, runs, scan
   results, audit log, and reports.
-- Three working collectors right now: `fixture` (synthetic, for demos),
+- Four working collectors right now: `fixture` (synthetic, for demos),
   `crtsh` (subdomain discovery via certificate transparency),
-  `email_security` (SPF / DMARC / DKIM / MX posture, DNS-only).
+  `email_security` (SPF / DMARC / DKIM / MX posture, DNS-only), and
+  `github_repos` (enumerate an org's public repositories).
 - In-process scan queue with N workers. Scan output is persisted; a
   server restart keeps your data.
 - Server-Sent Events stream at `/api/v1/runs/{id}/events` for live run
@@ -195,6 +196,7 @@ internal/
       fixture/        — synthetic, for tests
       crtsh/          — certificate transparency
       emailsec/       — SPF / DMARC / DKIM / MX
+      githubrepos/    — GitHub org repository enumeration
   scope/              — scope policy matcher
   store/
     memory/           — in-memory repository implementations

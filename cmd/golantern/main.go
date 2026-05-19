@@ -26,6 +26,7 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
+	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
 	"github.com/silvance/golantern/internal/store/sqlite"
@@ -99,6 +100,7 @@ func cmdServe(args []string) error {
 	reg.Register(fixture.Name, fixture.New)
 	reg.Register(crtsh.Name, crtsh.New)
 	reg.Register(emailsec.Name, emailsec.New)
+	reg.Register(githubrepos.Name, githubrepos.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
