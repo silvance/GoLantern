@@ -30,7 +30,7 @@ var presets = map[project.Mode]ModePreset{
 		RecommendedTools: map[Phase][]string{
 			PhaseOSINT:          {"crtsh", "theharvester"},
 			PhaseAssetDiscovery: {"crtsh", "dnsx"},
-			PhaseValidation:     {"httpx_probe", "dnsx", "msf_smb_version", "msf_ssh_version"},
+			PhaseValidation:     {"httpx_probe", "gowitness", "dnsx", "msf_smb_version", "msf_ssh_version"},
 			PhaseExposure:       {"nuclei", "testssl", "msf_smb_enumshares", "msf_ftp_anonymous"},
 			PhaseEnrichment:     {"shodan", "censys", "hibp"},
 		},
@@ -57,7 +57,7 @@ var presets = map[project.Mode]ModePreset{
 		// box has one IP and no DNS / breach-data context.
 		SuggestedScopeKind: scope.KindFullActive,
 		RecommendedTools: map[Phase][]string{
-			PhaseValidation: {"nmap", "httpx_probe", "whatweb"},
+			PhaseValidation: {"nmap", "httpx_probe", "gowitness", "whatweb"},
 			PhaseExposure:   {"feroxbuster", "ffuf", "gobuster", "nikto", "nuclei", "katana", "smbmap", "enum4linux_ng", "netexec"},
 		},
 		ReportTemplate: "ctf",

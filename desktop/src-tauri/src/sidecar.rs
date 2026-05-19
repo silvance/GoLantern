@@ -128,6 +128,12 @@ pub async fn spawn() -> Result<SidecarHandle> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_BACKEND_PORT);
     let base_url = format!("http://{host}:{port}");
+    // Optional artifact storage. When the operator sets this env var,
+    // the sidecar passes --artifacts-dir to the backend so collectors
+    // like gowitness can persist screenshots. Unset = backend leaves
+    // artifact storage disabled and the SPA's Artifacts panel shows a
+    // helpful "not configured" message.
+    let artifacts_dir = std::env::var("GOLANTERN_ARTIFACTS_DIR").ok();
 
     // Pre-flight: refuse to spawn when the port is already taken. A
     // stale `golantern` from a previous run that didn't shut down
@@ -172,6 +178,10 @@ second instance."
             .arg(format!("{host}:{port}"));
         c
     };
+    if let Some(dir) = artifacts_dir.as_deref() {
+        tracing::info!(dir, "artifact storage enabled via GOLANTERN_ARTIFACTS_DIR");
+        command.arg("--artifacts-dir").arg(dir);
+    }
     command.kill_on_drop(true);
 
     let child = command

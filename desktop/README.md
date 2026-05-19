@@ -102,6 +102,7 @@ waits for the backend, then opens the main window pointing at
 | `GOLANTERN_BACKEND_BIN` | _unset_        | Override the bundled-binary path            |
 | `GOLANTERN_API_HOST`    | `127.0.0.1`    | Backend bind host                           |
 | `GOLANTERN_API_PORT`    | `8765`         | Backend bind port                           |
+| `GOLANTERN_ARTIFACTS_DIR` | _unset_      | Filesystem dir for artifact bytes (screenshots, captures). Empty disables; the SPA's Artifacts panel surfaces the disabled state. |
 
 ## Build a release bundle
 

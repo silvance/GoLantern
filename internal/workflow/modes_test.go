@@ -54,6 +54,20 @@ func TestRecommendedToolsCTFEmptyForNonRelevantPhases(t *testing.T) {
 	}
 }
 
+// TestGowitnessRecommendedAcrossModes documents that every mode's
+// Validation phase suggests gowitness now that the artifact subsystem
+// supports it. Operators on environments without artifact storage
+// configured will still see the collector skip cleanly at runtime,
+// but the recommendation makes the screenshot workflow discoverable.
+func TestGowitnessRecommendedAcrossModes(t *testing.T) {
+	for _, m := range []project.Mode{project.ModeAssessment, project.ModeBugBounty, project.ModeCTF} {
+		tools := RecommendedToolsForPhase(m, PhaseValidation)
+		if !slices.Contains(tools, "gowitness") {
+			t.Errorf("mode %q Validation tools missing gowitness: %v", m, tools)
+		}
+	}
+}
+
 func TestRecommendedToolsReturnsCopy(t *testing.T) {
 	got := RecommendedToolsForPhase(project.ModeAssessment, PhaseOSINT)
 	if len(got) == 0 {

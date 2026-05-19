@@ -26,6 +26,21 @@
       <ul id="project-list"></ul>
     </section>
 
+    <section id="artifacts">
+      <h2>Artifacts</h2>
+      <p class="lede">
+        Screenshots and other binary captures from collectors like
+        <code>gowitness</code>. Requires the server to be started with
+        <code>--artifacts-dir</code>; without it the list endpoint
+        returns 501.
+      </p>
+      <label for="artifact-project">Project:</label>
+      <select id="artifact-project"><option value="">(none)</option></select>
+      <button id="reload-artifacts">Reload</button>
+      <div id="artifact-grid" class="artifact-grid"></div>
+      <p id="artifact-status" class="muted"></p>
+    </section>
+
     <section id="readme">
       <h2>About this UI</h2>
       <p>
