@@ -27,6 +27,7 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
+	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
@@ -102,6 +103,7 @@ func cmdServe(args []string) error {
 	reg.Register(crtsh.Name, crtsh.New)
 	reg.Register(emailsec.Name, emailsec.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
+	reg.Register(httpxprobe.Name, httpxprobe.New)
 	reg.Register(nmap.Name, nmap.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
