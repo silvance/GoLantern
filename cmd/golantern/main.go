@@ -20,6 +20,7 @@ import (
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
+	"github.com/silvance/golantern/internal/store/sqlite"
 	"github.com/silvance/golantern/internal/workflow"
 )
 
@@ -57,6 +58,7 @@ Run 'golantern serve --help' for flags.`)
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8000", "listen address")
+	dbPath := fs.String("db", "", "SQLite database path; empty uses an in-memory store")
 	demo := fs.Bool("seed-demo", false, "preload a demo project before serving")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -64,15 +66,39 @@ func cmdServe(args []string) error {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	st := memory.New()
-	if *demo {
-		if err := seedDemo(st); err != nil {
-			return fmt.Errorf("seed demo: %w", err)
+	var projects project.Repository
+	var scopes scope.Repository
+	var runs run.Repository
+
+	if *dbPath == "" {
+		st := memory.New()
+		if *demo {
+			if err := seedDemoMemory(st); err != nil {
+				return fmt.Errorf("seed demo: %w", err)
+			}
+			logger.Info("seeded demo project (in-memory store)")
 		}
-		logger.Info("seeded demo project")
+		projects, scopes, runs = st.Projects, st.Scopes, st.Runs
+	} else {
+		db, err := sqlite.Open(*dbPath)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		if err := sqlite.Migrate(context.Background(), db); err != nil {
+			return err
+		}
+		st := sqlite.NewStore(db)
+		if *demo {
+			if err := seedDemoSQLite(st); err != nil {
+				return fmt.Errorf("seed demo: %w", err)
+			}
+			logger.Info("seeded demo project", slog.String("db", *dbPath))
+		}
+		projects, scopes, runs = st.Projects, st.Scopes, st.Runs
 	}
 
-	srv := api.New(st.Projects, st.Scopes, st.Runs)
+	srv := api.New(projects, scopes, runs)
 	srv.Logger = logger
 
 	httpSrv := &http.Server{
@@ -112,11 +138,16 @@ func cmdServe(args []string) error {
 	}
 }
 
-// seedDemo writes a small fixture so an operator can poke at the read
-// endpoints without first writing through the API. The shape mirrors
-// lantern.demo.seed_demo_project at a much smaller scale.
-func seedDemo(st *memory.Store) error {
-	ctx := context.Background()
+// seedFixture is the shared fixture both stores use so the demo data is
+// identical regardless of backend. Returns a fresh fixture each call;
+// repository.Save assigns IDs.
+type seedFixture struct {
+	Project *project.Project
+	Rules   []*scope.StoredRule
+	Run     *run.Run
+}
+
+func newSeedFixture() *seedFixture {
 	p := &project.Project{
 		Name:         "Demo: acme.example",
 		Description:  "Seeded demo for the Go read-side server",
@@ -124,28 +155,52 @@ func seedDemo(st *memory.Store) error {
 		DefaultScope: scope.KindPassive,
 		Mode:         project.ModeAssessment,
 	}
-	if err := st.Projects.Save(ctx, p); err != nil {
+	return &seedFixture{
+		Project: p,
+		Rules: []*scope.StoredRule{
+			{Rule: scope.Rule{Pattern: "*.acme.example", Kind: scope.KindLightActive}},
+			{Rule: scope.Rule{Pattern: "api.acme.example", Kind: scope.KindFullActive}},
+			{Rule: scope.Rule{Pattern: "legacy.acme.example", Kind: scope.KindDeny}},
+		},
+		Run: &run.Run{
+			Phase:  workflow.PhaseOSINT,
+			Status: run.StatusCompleted,
+			Label:  "initial OSINT sweep",
+		},
+	}
+}
+
+func seedDemoMemory(st *memory.Store) error {
+	return seedDemoInto(context.Background(), st.Projects, st.Scopes, st.Runs)
+}
+
+func seedDemoSQLite(st *sqlite.Store) error {
+	return seedDemoInto(context.Background(), st.Projects, st.Scopes, st.Runs)
+}
+
+// seedDemoInto is store-agnostic: it consumes the repository interfaces,
+// so adding another backend later (Postgres) doesn't need another seed
+// function. Idempotent: a duplicate project from a prior seed surfaces
+// as ErrDuplicate and is treated as a no-op.
+func seedDemoInto(
+	ctx context.Context,
+	projects project.Repository,
+	scopes scope.Repository,
+	runs run.Repository,
+) error {
+	f := newSeedFixture()
+	if err := projects.Save(ctx, f.Project); err != nil {
+		if errors.Is(err, project.ErrDuplicate) {
+			return nil
+		}
 		return err
 	}
-	for _, r := range []struct {
-		pattern string
-		kind    scope.RuleKind
-	}{
-		{"*.acme.example", scope.KindLightActive},
-		{"api.acme.example", scope.KindFullActive},
-		{"legacy.acme.example", scope.KindDeny},
-	} {
-		if err := st.Scopes.Add(ctx, &scope.StoredRule{
-			ProjectID: p.ID, Rule: scope.Rule{Pattern: r.pattern, Kind: r.kind},
-		}); err != nil {
+	for _, sr := range f.Rules {
+		sr.ProjectID = f.Project.ID
+		if err := scopes.Add(ctx, sr); err != nil {
 			return err
 		}
 	}
-	ru := &run.Run{
-		ProjectID: p.ID,
-		Phase:     workflow.PhaseOSINT,
-		Status:    run.StatusCompleted,
-		Label:     "initial OSINT sweep",
-	}
-	return st.Runs.Save(ctx, ru)
+	f.Run.ProjectID = f.Project.ID
+	return runs.Save(ctx, f.Run)
 }
