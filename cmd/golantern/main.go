@@ -23,9 +23,11 @@ import (
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scan"
+	"github.com/silvance/golantern/internal/scan/collectors/censys"
 	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
 	"github.com/silvance/golantern/internal/scan/collectors/dnsx"
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
+	"github.com/silvance/golantern/internal/scan/collectors/exiftool"
 	"github.com/silvance/golantern/internal/scan/collectors/ffuf"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
@@ -36,7 +38,9 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/nuclei"
 	"github.com/silvance/golantern/internal/scan/collectors/shodan"
 	"github.com/silvance/golantern/internal/scan/collectors/subfinder"
+	"github.com/silvance/golantern/internal/scan/collectors/testssl"
 	"github.com/silvance/golantern/internal/scan/collectors/theharvester"
+	"github.com/silvance/golantern/internal/scan/collectors/trufflehog"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
 	"github.com/silvance/golantern/internal/store/sqlite"
@@ -108,9 +112,11 @@ func cmdServe(args []string) error {
 	// get wired; new collectors register here as they land.
 	reg := scan.NewRegistry()
 	reg.Register(fixture.Name, fixture.New)
+	reg.Register(censys.Name, censys.New)
 	reg.Register(crtsh.Name, crtsh.New)
 	reg.Register(dnsx.Name, dnsx.New)
 	reg.Register(emailsec.Name, emailsec.New)
+	reg.Register(exiftool.Name, exiftool.New)
 	reg.Register(ffuf.Name, ffuf.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
 	reg.Register(hibp.Name, hibp.New)
@@ -120,7 +126,9 @@ func cmdServe(args []string) error {
 	reg.Register(nuclei.Name, nuclei.New)
 	reg.Register(shodan.Name, shodan.New)
 	reg.Register(subfinder.Name, subfinder.New)
+	reg.Register(testssl.Name, testssl.New)
 	reg.Register(theharvester.Name, theharvester.New)
+	reg.Register(trufflehog.Name, trufflehog.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
