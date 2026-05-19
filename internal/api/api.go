@@ -137,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("POST /api/v1/projects/{id}/runs", s.handleCreateRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
+	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", s.handleCancelRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
 	mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	mux.HandleFunc("POST /api/v1/projects/{id}/assistant/ask", s.handleAssistantAsk)
@@ -1197,6 +1198,54 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeError(w, r, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, toRunDTO(ru))
+}
+
+// handleCancelRun is POST /api/v1/runs/{id}/cancel. Cooperatively
+// cancels the run: marks the row CANCELLED so the engine's
+// per-iteration status check stops dispatching further tools.
+// In-flight collectors finish naturally; we don't try to kill them
+// because their tool-execution rows aren't safe to interrupt mid-write.
+//
+//   - 200 with the updated DTO when the transition was applied.
+//   - 404 when the run is unknown.
+//   - 409 when the run is already terminal.
+func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
+	rid := r.PathValue("id")
+	ru, err := s.Runs.Get(r.Context(), rid)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if !ru.Status.CanTransitionTo(run.StatusCancelled) {
+		writeJSON(w, http.StatusConflict, errorBody(
+			fmt.Sprintf("run %s is already %q; cannot cancel", rid, ru.Status)))
+		return
+	}
+	ru.Status = run.StatusCancelled
+	now := time.Now().UTC()
+	if ru.FinishedAt == nil {
+		ru.FinishedAt = &now
+	}
+	if err := s.Runs.Save(r.Context(), ru); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID: ru.ProjectID,
+		Action:    "run.cancel_requested",
+		Target:    ru.ID,
+		Detail:    map[string]any{"phase": string(ru.Phase)},
+	})
+	// Publish an event so any SPA tab watching the run sees it flip
+	// without waiting for the next poll.
+	if s.Bus != nil {
+		s.Bus.Publish(events.Event{
+			RunID:   rid,
+			Kind:    events.KindRunFinished,
+			Payload: map[string]any{"phase": string(ru.Phase), "status": "cancelled"},
+		})
 	}
 	writeJSON(w, http.StatusOK, toRunDTO(ru))
 }

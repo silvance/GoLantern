@@ -138,6 +138,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(req),
     }),
+  cancelRun: (runID: string) =>
+    request<Run>(`/api/v1/runs/${runID}/cancel`, { method: "POST" }),
   runEventsURL: (runID: string) => `${API_BASE}/api/v1/runs/${runID}/events`,
 
   // ----- Findings / entities / artifacts --------------------------------

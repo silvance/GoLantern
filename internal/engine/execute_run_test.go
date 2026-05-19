@@ -177,3 +177,59 @@ func (errCollector) Metadata() scan.Meta {
 func (errCollector) Run(_ context.Context, _ scan.Context) error {
 	return errors.New("explicit failure")
 }
+
+// TestExecuteRunCancelMidFlight verifies the engine's cooperative
+// cancellation: when a separate request marks the run as cancelled
+// while a collector is running, the next iteration's pre-check
+// stops dispatch and the run ends in StatusCancelled. The already-
+// running collector finishes naturally (one tool-execution row).
+func TestExecuteRunCancelMidFlight(t *testing.T) {
+	st, _, ru, deps := execSetup(t, []scope.Rule{
+		{Pattern: "*.example.com", Kind: scope.KindLightActive},
+	})
+	// Custom registry: the cancelling collector flips the run row
+	// during its Run() callback; the next collector should never see
+	// a dispatch.
+	reg := scan.NewRegistry()
+	reg.Register("canceller", func() scan.Collector {
+		return &cancellingCollector{runs: st.Runs, runID: ru.ID}
+	})
+	reg.Register(fixture.Name, fixture.New)
+	deps.Registry = reg
+
+	if err := engine.ExecuteRun(context.Background(), deps, ru.ID, []engine.Invocation{
+		{Tool: "canceller"},
+		{Tool: fixture.Name, Parameters: map[string]any{
+			"targets": []any{"a.example.com"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Runs.Get(context.Background(), ru.ID)
+	if got.Status != run.StatusCancelled {
+		t.Fatalf("status=%s, want cancelled", got.Status)
+	}
+	// Only the canceller should have a tool execution row; the
+	// fixture invocation must have been skipped.
+	txs, _ := st.Runs.ListToolExecutions(context.Background(), ru.ID)
+	if len(txs) != 1 || txs[0].Tool != "canceller" {
+		t.Fatalf("expected 1 tx (canceller), got %+v", txs)
+	}
+}
+
+type cancellingCollector struct {
+	runs  run.Repository
+	runID string
+}
+
+func (c *cancellingCollector) Metadata() scan.Meta {
+	return scan.Meta{Name: "canceller", Phase: workflow.PhaseOSINT, RequiredScope: scope.KindPassive}
+}
+func (c *cancellingCollector) Run(ctx context.Context, _ scan.Context) error {
+	ru, err := c.runs.Get(ctx, c.runID)
+	if err != nil {
+		return err
+	}
+	ru.Status = run.StatusCancelled
+	return c.runs.Save(ctx, ru)
+}

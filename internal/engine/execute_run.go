@@ -125,7 +125,21 @@ func ExecuteRun(
 	}
 
 	anyFailed := false
+	cancelled := false
 	for _, inv := range invocations {
+		// Cooperative cancellation: a separate request can flip the
+		// run row to CANCELLED while we're iterating. Re-fetch before
+		// each dispatch so that the next collector doesn't start.
+		// Already-in-flight collectors finish naturally — the runner
+		// has no signal channel back to us, and trying to kill them
+		// mid-write would corrupt their tool-execution row.
+		if cur, err := deps.Runs.Get(ctx, runID); err == nil &&
+			cur.Status == run.StatusCancelled {
+			cancelled = true
+			logger.InfoContext(ctx, "run cancelled mid-flight; not dispatching remaining tools",
+				slog.String("run_id", runID))
+			break
+		}
 		factory, err := deps.Registry.Get(inv.Tool)
 		if err != nil {
 			// Unknown tool: don't re-raise (would roll back to the
@@ -159,9 +173,12 @@ func ExecuteRun(
 
 	finishedAt := time.Now().UTC()
 	ru.FinishedAt = &finishedAt
-	if anyFailed {
+	switch {
+	case cancelled:
+		ru.Status = run.StatusCancelled
+	case anyFailed:
 		ru.Status = run.StatusFailed
-	} else {
+	default:
 		ru.Status = run.StatusCompleted
 	}
 	if err := deps.Runs.Save(ctx, ru); err != nil {

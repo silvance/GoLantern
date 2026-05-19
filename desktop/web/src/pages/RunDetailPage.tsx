@@ -54,6 +54,17 @@ export default function RunDetailPage() {
 
   const { events, status: sseStatus } = useRunEvents(runID);
 
+  // Cancel: flip the row to cancelled. Cooperative — the engine
+  // checks the row between dispatches; in-flight collectors finish
+  // naturally. The button shows for pending/running runs only.
+  const cancel = useMutation({
+    mutationFn: () => api.cancelRun(runID),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["run", runID] });
+      qc.invalidateQueries({ queryKey: ["runs", projectID] });
+    },
+  });
+
   // Re-run: POST a new run with the same phase + tool list this run
   // dispatched. Built from the tool_executions we already loaded so
   // we don't have to round-trip the original Run.parameters JSON.
@@ -126,6 +137,15 @@ export default function RunDetailPage() {
               />
               events: {sseStatus}
             </span>
+            {(run.status === "pending" || run.status === "running") && (
+              <Button
+                variant="danger"
+                onClick={() => cancel.mutate()}
+                disabled={cancel.isPending}
+              >
+                {cancel.isPending ? "Cancelling..." : "Cancel run"}
+              </Button>
+            )}
             {(run.status === "completed" ||
               run.status === "failed" ||
               run.status === "cancelled") &&
