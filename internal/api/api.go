@@ -68,6 +68,12 @@ type Server struct {
 	Assistant assistant.Provider
 	Logger    *slog.Logger
 
+	// WebUI is an optional http.Handler mounted at "/" as a fallback
+	// route. cmd/golantern wires the embedded desktop/dist bundle so
+	// the server is browseable; tests that don't need the SPA leave
+	// it nil and get the usual 404 on "/".
+	WebUI http.Handler
+
 	// Enqueue is the run-dispatch hook. When nil, POST /runs with a
 	// non-empty tools list returns 501 (Phase 4 behaviour). When set
 	// (Phase 5+), the handler enqueues and returns 201 — the queue's
@@ -129,6 +135,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{id}/assistant/ask", s.handleAssistantAsk)
 	mux.HandleFunc("GET /api/v1/projects/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
+	// Static SPA fallback. Anything not matched by the explicit /api
+	// or /healthz patterns above falls through to the embedded
+	// desktop/dist bundle. ServeMux's wildcard "/" pattern is the
+	// lowest-priority match, so this only fires for paths the API
+	// itself didn't claim. When the operator opts out by setting
+	// Server.WebUI to a nil handler, the mux returns the usual 404.
+	if s.WebUI != nil {
+		mux.Handle("GET /", s.WebUI)
+	}
 	return mux
 }
 

@@ -55,6 +55,55 @@ func seedProject(t *testing.T, st *memory.Store) *project.Project {
 	return p
 }
 
+// TestWebUIFallback exercises the optional SPA mount at "/". We
+// serve a stub one-page handler to keep this test free of the
+// desktop package, which carries the real embedded bundle.
+func TestWebUIFallback(t *testing.T) {
+	st := memory.New()
+	s := New(st.Projects, st.Scopes, st.Runs, st.Audit)
+	s.WebUI = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>SPA</html>"))
+	})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// Root serves the SPA.
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !bytes.Contains(body, []byte("SPA")) {
+		t.Fatalf("root: status=%d body=%q", resp.StatusCode, body)
+	}
+
+	// Existing API routes still win — the wildcard "/" pattern is
+	// strictly the lowest-priority match.
+	resp2, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	body2, _ := io.ReadAll(resp2.Body)
+	if !bytes.Contains(body2, []byte("status")) {
+		t.Fatalf("healthz didn't win against SPA fallback: %q", body2)
+	}
+}
+
+func TestNoWebUIYields404OnRoot(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404 when WebUI is unset", resp.StatusCode)
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	srv, _ := newTestServer(t)
 	var got map[string]string

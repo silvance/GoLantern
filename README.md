@@ -107,6 +107,10 @@ That binds to `127.0.0.1:8000` with an in-memory store (everything
 disappears on restart — fine for a tour, useless for real work). Hit
 `Ctrl-C` to stop; the queue drains gracefully.
 
+Open `http://127.0.0.1:8000/` in a browser for the placeholder web UI
+(project list + artifact thumbnails), or `curl localhost:8000/healthz`
+for a quick liveness check.
+
 ### With persistence
 
 Point at a SQLite file and your data survives restarts:

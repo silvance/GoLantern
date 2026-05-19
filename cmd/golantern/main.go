@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/silvance/golantern/desktop"
 	"github.com/silvance/golantern/internal/api"
 	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/assistant"
@@ -229,6 +230,7 @@ func cmdServe(args []string) error {
 	srv.ArtifactStore = artifactStore
 	srv.Bus = bus
 	srv.Assistant = assistantProvider
+	srv.WebUI = desktop.Handler()
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
 		jobInvs := make([]jobs.Invocation, len(invocations))
 		for i, inv := range invocations {

@@ -1,9 +1,16 @@
-// Tiny placeholder UI. Just enough to verify the Tauri webview
-// reaches the GoLantern backend over loopback. A real SPA replaces
-// this dist/ wholesale; this file's value is "stop here and write
-// fetch wrappers, not in component code."
+// Tiny placeholder UI. Just enough to verify the webview / browser
+// reaches the GoLantern backend. A real SPA replaces this dist/
+// wholesale; this file's value is "stop here and write fetch
+// wrappers, not in component code."
+//
+// The API lives at the same origin we were served from. When the Go
+// binary serves this dist/ itself that's "http://127.0.0.1:<port>";
+// the Tauri shell preserves the same equivalence by pointing the
+// webview at the backend port via the sidecar. Either way, relative
+// URLs would also work — we keep the absolute form so the Network
+// tab shows the backend explicitly.
 
-const API_BASE = "http://127.0.0.1:8765";
+const API_BASE = window.location.origin;
 document.getElementById("api-base").textContent = API_BASE;
 
 async function call(path, opts = {}) {
