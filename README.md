@@ -107,9 +107,16 @@ That binds to `127.0.0.1:8000` with an in-memory store (everything
 disappears on restart — fine for a tour, useless for real work). Hit
 `Ctrl-C` to stop; the queue drains gracefully.
 
-Open `http://127.0.0.1:8000/` in a browser for the placeholder web UI
-(project list + artifact thumbnails), or `curl localhost:8000/healthz`
-for a quick liveness check.
+Open `http://127.0.0.1:8000/` in a browser for the web UI — project
+list, scope editor, runs with live SSE feed, findings, entities,
+artifact thumbnails, audit log, LLM assistant, doctor view, and
+report downloads (PDF / DOCX / HTML / CSV / JSON). Or use
+`curl localhost:8000/healthz` for a quick liveness check.
+
+The UI source lives at `desktop/web/` (React + Vite + TypeScript +
+Tailwind); the built bundle is committed to `desktop/dist/` and
+embedded into the Go binary via `//go:embed`. See `desktop/README.md`
+for the dev loop.
 
 ### With persistence
 
