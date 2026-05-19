@@ -133,6 +133,8 @@ func cmdServe(args []string) error {
 
 	srv := api.New(r.Projects, r.Scopes, r.Runs, r.Audit)
 	srv.Logger = logger
+	srv.Entities = r.Entities
+	srv.Findings = r.Findings
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
 		jobInvs := make([]jobs.Invocation, len(invocations))
 		for i, inv := range invocations {

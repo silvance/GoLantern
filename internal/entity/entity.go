@@ -44,6 +44,11 @@ type Repository interface {
 	// collectors can consume earlier-phase output (e.g. dnsx
 	// resolving subdomains found by crt.sh).
 	ListValuesByKind(ctx context.Context, projectID string, kind Kind) ([]string, error)
+
+	// ListByProject returns every entity row for the project in
+	// insertion order. Used by report generation; renderers group
+	// by kind client-side.
+	ListByProject(ctx context.Context, projectID string) ([]*Entity, error)
 }
 
 // Kind enumerates entity kinds. Mirrors lantern's EntityKind. String

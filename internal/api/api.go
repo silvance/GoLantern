@@ -25,7 +25,10 @@ import (
 
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
+	"github.com/silvance/golantern/internal/entity"
+	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/project"
+	"github.com/silvance/golantern/internal/report"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/workflow"
@@ -39,6 +42,11 @@ type Server struct {
 	Scopes   scope.Repository
 	Runs     run.Repository
 	Audit    audit.Repository
+	// Entities and Findings are optional at the Server level. The
+	// report endpoint needs them; everything else does without. When
+	// either is nil, GET /report returns 501.
+	Entities entity.Repository
+	Findings finding.Repository
 	Logger   *slog.Logger
 
 	// Enqueue is the run-dispatch hook. When nil, POST /runs with a
@@ -93,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/projects/{id}/scope-rules/{ruleID}", s.handleDeleteScopeRule)
 	mux.HandleFunc("GET /api/v1/projects/{id}/scope/test", s.handleScopeTest)
 	mux.HandleFunc("GET /api/v1/projects/{id}/audit-logs", s.handleListAuditLogs)
+	mux.HandleFunc("GET /api/v1/projects/{id}/report", s.handleReport)
 	mux.HandleFunc("GET /api/v1/projects/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("POST /api/v1/projects/{id}/runs", s.handleCreateRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
@@ -349,6 +358,57 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleReport implements GET /api/v1/projects/{id}/report.
+//
+// Query parameter: format=json (default) | html | csv. JSON ships the
+// raw bundle; HTML and CSV render through the report package. Returns
+// 501 when entity or finding repos haven't been wired into the server.
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	if s.Entities == nil || s.Findings == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"report endpoint not configured on this server"))
+		return
+	}
+	projectID := r.PathValue("id")
+	b, err := report.Generate(r.Context(), report.Deps{
+		Projects: s.Projects,
+		Entities: s.Entities,
+		Findings: s.Findings,
+		Runs:     s.Runs,
+		Audit:    s.Audit,
+	}, projectID, report.Options{})
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	switch strings.ToLower(r.URL.Query().Get("format")) {
+	case "", "json":
+		writeJSON(w, http.StatusOK, b)
+	case "html":
+		out, err := report.RenderHTML(b)
+		if err != nil {
+			s.writeError(w, r, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+	case "csv":
+		out, err := report.RenderCSV(b)
+		if err != nil {
+			s.writeError(w, r, err)
+			return
+		}
+		filename := fmt.Sprintf("lantern-report-%s.csv", b.Project.ID)
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+	default:
+		writeJSON(w, http.StatusBadRequest, errorBody("format must be one of: json, html, csv"))
+	}
 }
 
 func (s *Server) handleListScopeRules(w http.ResponseWriter, r *http.Request) {

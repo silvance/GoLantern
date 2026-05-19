@@ -71,6 +71,22 @@ func (r *EntityRepo) ListValuesByKind(_ context.Context, projectID string, kind 
 	return out, nil
 }
 
+func (r *EntityRepo) ListByProject(_ context.Context, projectID string) ([]*entity.Entity, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := r.byProj[projectID]
+	out := make([]*entity.Entity, 0, len(ids))
+	for _, eid := range ids {
+		e := r.byID[eid]
+		clone := *e
+		// Attributes is a map; deep-copy so callers can't mutate the
+		// store through the returned snapshot.
+		clone.Attributes = copyMap(e.Attributes)
+		out = append(out, &clone)
+	}
+	return out, nil
+}
+
 // Get is not on the Repository interface; tests use it to verify state
 // without round-tripping through the public surface.
 func (r *EntityRepo) Get(_ context.Context, entityID string) (*entity.Entity, error) {
