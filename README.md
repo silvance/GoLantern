@@ -20,6 +20,12 @@ See `docs/ARCHITECTURE.md` for the design analysis and migration plan.
 - Server-Sent Events stream at `/api/v1/runs/{id}/events` for live run
   progress.
 - HTML / CSV / JSON / PDF / DOCX report renderer.
+- Optional LLM assistant (Anthropic Claude or OpenAI GPT) reachable at
+  `POST /api/v1/projects/{id}/assistant/ask`, with prompt-injection
+  defenses on untrusted tool output. Enable with
+  `LANTERN_ASSISTANT_ENABLED=true`,
+  `LANTERN_ASSISTANT_PROVIDER=anthropic|openai`,
+  `LANTERN_ASSISTANT_API_KEY=...`.
 - SQLite backend with the same on-disk schema Lantern's Python service
   uses, so the two can share a database during migration.
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/silvance/golantern/internal/assistant"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/project"
@@ -792,5 +793,127 @@ func TestGetRunAndToolExecutions(t *testing.T) {
 	status, _ = getJSON(t, srv.URL+"/api/v1/runs/"+ru.ID+"/tool-executions", &txs)
 	if status != 200 || len(txs) != 1 || txs[0].EntitiesEmitted != 3 {
 		t.Fatalf("status=%d txs=%+v", status, txs)
+	}
+}
+
+// ----- assistant ---------------------------------------------------
+
+// fakeProvider satisfies assistant.Provider for tests: records the
+// last (system, messages) pair and returns a canned Reply.
+type fakeAssistant struct {
+	lastSystem string
+	lastMsgs   []assistant.Message
+}
+
+func (f *fakeAssistant) Name() string { return "fake" }
+
+func (f *fakeAssistant) Complete(_ context.Context, system string, msgs []assistant.Message) (*assistant.Reply, error) {
+	f.lastSystem = system
+	f.lastMsgs = msgs
+	return &assistant.Reply{
+		Content:      "Try running httpx_probe against the new subdomains.",
+		Model:        "fake-1.0",
+		InputTokens:  100,
+		OutputTokens: 20,
+	}, nil
+}
+
+func TestAssistantAsk501WhenUnconfigured(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := seedProject(t, st)
+	status, _ := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/assistant/ask",
+		map[string]any{"question": "what next?"})
+	if status != http.StatusNotImplemented {
+		t.Fatalf("status=%d, want 501", status)
+	}
+}
+
+func TestAssistantAskHappyPath(t *testing.T) {
+	st := memory.New()
+	fp := &fakeAssistant{}
+	s := New(st.Projects, st.Scopes, st.Runs, st.Audit)
+	s.Entities = st.Entities
+	s.Findings = st.Findings
+	s.Assistant = fp
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	p := seedProject(t, st)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/assistant/ask",
+		map[string]any{"question": "What's exposed?", "mode": "ctf"})
+	if status != 200 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got assistantAskResponse
+	_ = json.Unmarshal(body, &got)
+	if got.Content == "" || got.Model != "fake-1.0" {
+		t.Fatalf("response wrong: %+v", got)
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 20 {
+		t.Fatalf("usage missing: %+v", got)
+	}
+	// System prompt should carry the CTF overlay; user message should
+	// carry the project name.
+	if !strings.Contains(fp.lastSystem, "capture-the-flag") {
+		t.Fatalf("CTF overlay missing from system prompt")
+	}
+	if len(fp.lastMsgs) != 1 || !strings.Contains(fp.lastMsgs[0].Content, p.Name) {
+		t.Fatalf("user message did not carry project name: %+v", fp.lastMsgs)
+	}
+	// Audit row recorded.
+	rows, _ := st.Audit.ListByProject(context.Background(), p.ID)
+	var saw bool
+	for _, r := range rows {
+		if r.Action == "assistant.ask" {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatal("audit missing assistant.ask row")
+	}
+}
+
+func TestAssistantAskValidation(t *testing.T) {
+	st := memory.New()
+	s := New(st.Projects, st.Scopes, st.Runs, st.Audit)
+	s.Entities = st.Entities
+	s.Findings = st.Findings
+	s.Assistant = &fakeAssistant{}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	p := seedProject(t, st)
+	cases := []struct {
+		name string
+		body any
+		want int
+	}{
+		{"missing question", map[string]any{}, 400},
+		{"blank question", map[string]any{"question": "   "}, 400},
+		{"unknown field", map[string]any{"question": "ok", "foo": "bar"}, 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			status, _ := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/assistant/ask", c.body)
+			if status != c.want {
+				t.Fatalf("status=%d, want %d", status, c.want)
+			}
+		})
+	}
+}
+
+func TestAssistantAskMissingProjectIs404(t *testing.T) {
+	st := memory.New()
+	s := New(st.Projects, st.Scopes, st.Runs, st.Audit)
+	s.Entities = st.Entities
+	s.Findings = st.Findings
+	s.Assistant = &fakeAssistant{}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	status, _ := postJSON(t, srv.URL+"/api/v1/projects/ghost/assistant/ask",
+		map[string]any{"question": "x"})
+	if status != 404 {
+		t.Fatalf("status=%d", status)
 	}
 }

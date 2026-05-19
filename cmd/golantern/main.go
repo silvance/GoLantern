@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/silvance/golantern/internal/api"
+	"github.com/silvance/golantern/internal/assistant"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/entity"
@@ -174,11 +176,35 @@ func cmdServe(args []string) error {
 		return err
 	}
 
+	// Optional LLM assistant. Driven by env vars so an operator can
+	// flip it on without rebuilding. Two-stage gate: master switch
+	// must be on AND the provider config must be valid. Anything
+	// short of "fully configured" gracefully degrades to a /assistant
+	// endpoint that returns 501, which the SPA handles as "feature
+	// off" rather than an error.
+	var assistantProvider assistant.Provider
+	if os.Getenv("LANTERN_ASSISTANT_ENABLED") == "true" {
+		ap, err := assistant.Get(assistant.Config{
+			Enabled:      true,
+			ProviderName: os.Getenv("LANTERN_ASSISTANT_PROVIDER"),
+			APIKey:       os.Getenv("LANTERN_ASSISTANT_API_KEY"),
+			Model:        os.Getenv("LANTERN_ASSISTANT_MODEL"),
+			MaxTokens:    parseEnvInt("LANTERN_ASSISTANT_MAX_TOKENS", 2048),
+		})
+		if err != nil {
+			logger.Warn("assistant disabled (configuration error)", slog.Any("err", err))
+		} else {
+			assistantProvider = ap
+			logger.Info("assistant enabled", slog.String("provider", ap.Name()))
+		}
+	}
+
 	srv := api.New(r.Projects, r.Scopes, r.Runs, r.Audit)
 	srv.Logger = logger
 	srv.Entities = r.Entities
 	srv.Findings = r.Findings
 	srv.Bus = bus
+	srv.Assistant = assistantProvider
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
 		jobInvs := make([]jobs.Invocation, len(invocations))
 		for i, inv := range invocations {
@@ -319,4 +345,19 @@ func seedDemoInto(
 	}
 	f.Run.ProjectID = f.Project.ID
 	return runs.Save(ctx, f.Run)
+}
+
+// parseEnvInt reads an integer env var, falling back to fallback when
+// the var is unset or unparseable. Used for the assistant's max-tokens
+// knob so operators don't have to recompile to bump it.
+func parseEnvInt(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }

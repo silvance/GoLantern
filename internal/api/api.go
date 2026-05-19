@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/silvance/golantern/internal/assistant"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/entity"
@@ -55,7 +56,11 @@ type Server struct {
 	// frame to keep idle connections open. Defaults to 15s. Tests
 	// override this to keep the suite fast.
 	SSEKeepalive time.Duration
-	Logger       *slog.Logger
+	// Assistant is optional. When nil, POST /assistant/ask returns
+	// 501. cmd/golantern wires this when LANTERN_ASSISTANT_ENABLED
+	// is true.
+	Assistant assistant.Provider
+	Logger    *slog.Logger
 
 	// Enqueue is the run-dispatch hook. When nil, POST /runs with a
 	// non-empty tools list returns 501 (Phase 4 behaviour). When set
@@ -115,7 +120,111 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
 	mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
+	mux.HandleFunc("POST /api/v1/projects/{id}/assistant/ask", s.handleAssistantAsk)
 	return mux
+}
+
+// handleAssistantAsk implements POST /api/v1/projects/{id}/assistant/ask.
+//
+// Body: {question: string, mode?: string}. The mode parameter, when
+// omitted, defaults to the project's mode. Returns the assistant's
+// reply text plus the model name and token usage so the SPA can show
+// cost.
+//
+// 501 when Server.Assistant is nil (feature disabled or unconfigured);
+// 400 on missing/empty question; 404 on missing project; 502 on
+// upstream provider failure (rate limit, server error). The provider
+// error message is included verbatim so analysts can distinguish a
+// transient 429 from a malformed-request 400.
+func (s *Server) handleAssistantAsk(w http.ResponseWriter, r *http.Request) {
+	if s.Assistant == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"assistant not configured on this server"))
+		return
+	}
+	if s.Entities == nil || s.Findings == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"assistant needs entity + finding repositories on the server"))
+		return
+	}
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	var req assistantAskRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	req.Question = strings.TrimSpace(req.Question)
+	if req.Question == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("question is required"))
+		return
+	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = string(p.Mode)
+	}
+
+	// Build the bundle once; reuse for the prompt's context block.
+	bundle, err := report.Generate(r.Context(), report.Deps{
+		Projects: s.Projects, Entities: s.Entities, Findings: s.Findings,
+		Runs: s.Runs, Audit: s.Audit,
+	}, projectID, report.Options{})
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	system := assistant.SystemPromptFor(mode)
+	user := assistant.BuildPrompt(bundle, req.Question)
+
+	reply, err := s.Assistant.Complete(r.Context(), system, []assistant.Message{
+		{Role: "user", Content: user},
+	})
+	if err != nil {
+		s.Logger.WarnContext(r.Context(), "assistant Complete failed",
+			slog.String("project_id", projectID), slog.Any("err", err))
+		writeJSON(w, http.StatusBadGateway, errorBody(err.Error()))
+		return
+	}
+	// Audit the call so the trail of "what did the LLM see / say"
+	// stays reviewable. Detail omits the prompt text (too long) but
+	// records the mode, question, model, and usage.
+	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: p.Name,
+		Action:              "assistant.ask",
+		Target:              reply.Model,
+		Detail: map[string]any{
+			"mode":          mode,
+			"question_len":  len(req.Question),
+			"reply_len":     len(reply.Content),
+			"input_tokens":  reply.InputTokens,
+			"output_tokens": reply.OutputTokens,
+		},
+	})
+	writeJSON(w, http.StatusOK, assistantAskResponse{
+		Content:      reply.Content,
+		Model:        reply.Model,
+		InputTokens:  reply.InputTokens,
+		OutputTokens: reply.OutputTokens,
+	})
+}
+
+type assistantAskRequest struct {
+	Question string `json:"question"`
+	Mode     string `json:"mode,omitempty"`
+}
+
+type assistantAskResponse struct {
+	Content      string `json:"content"`
+	Model        string `json:"model"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
 }
 
 // ----- handlers --------------------------------------------------------
