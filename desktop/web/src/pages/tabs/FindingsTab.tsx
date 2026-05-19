@@ -77,8 +77,49 @@ export default function FindingsTab({ projectID }: { projectID: string }) {
                       {f.recommendation}
                     </p>
                   )}
+                  {f.evidence && f.evidence.length > 0 && (
+                    <details className="mt-3">
+                      <summary className="text-xs text-slate-500 dark:text-slate-400 cursor-pointer">
+                        {f.evidence.length} evidence row
+                        {f.evidence.length === 1 ? "" : "s"}
+                      </summary>
+                      <ul className="mt-2 space-y-2">
+                        {f.evidence.map((ev) => (
+                          <li
+                            key={ev.id}
+                            className="bg-slate-50 dark:bg-slate-800 p-2 rounded text-xs"
+                          >
+                            <div className="flex flex-wrap items-center gap-x-3 text-slate-600 dark:text-slate-300">
+                              <span>
+                                <span className="font-medium">tool: </span>
+                                <code>{ev.source_tool}</code>
+                              </span>
+                              <span>
+                                <span className="font-medium">source: </span>
+                                {ev.source_category}
+                              </span>
+                              <span>
+                                <span className="font-medium">confidence: </span>
+                                {ev.confidence}
+                              </span>
+                            </div>
+                            {ev.notes && (
+                              <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                {ev.notes}
+                              </div>
+                            )}
+                            {ev.payload && Object.keys(ev.payload).length > 0 && (
+                              <pre className="mt-1 text-[11px] overflow-x-auto whitespace-pre-wrap">
+                                {JSON.stringify(ev.payload, null, 2)}
+                              </pre>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-slate-400 shrink-0">
                   confidence: {f.confidence}
                 </span>
               </div>

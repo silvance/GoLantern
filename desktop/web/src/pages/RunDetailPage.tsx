@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import {
@@ -14,6 +15,7 @@ import { useRunEvents } from "../hooks/useRunEvents";
 
 export default function RunDetailPage() {
   const { projectID = "", runID = "" } = useParams();
+  const qc = useQueryClient();
   const runQ = useQuery({
     queryKey: ["run", runID],
     queryFn: () => api.getRun(runID),
@@ -48,6 +50,29 @@ export default function RunDetailPage() {
   });
 
   const { events, status: sseStatus } = useRunEvents(runID);
+
+  // When a tool finishes (or emits anything report-shaped), invalidate
+  // the project-level caches so the user's other tabs come back to
+  // life when they switch back. Throttling: we only invalidate on
+  // tool.finished, not on every entity/finding emit, because the
+  // tabs aren't visible during a run anyway and TanStack Query will
+  // re-fetch when the user navigates.
+  const lastEvent = events[events.length - 1];
+  useEffect(() => {
+    if (!lastEvent) return;
+    if (
+      lastEvent.kind === "tool.finished" ||
+      lastEvent.kind === "tool.started"
+    ) {
+      qc.invalidateQueries({ queryKey: ["tool-executions", runID] });
+      qc.invalidateQueries({ queryKey: ["run", runID] });
+    }
+    if (lastEvent.kind === "tool.finished") {
+      qc.invalidateQueries({ queryKey: ["report", projectID] });
+      qc.invalidateQueries({ queryKey: ["artifacts", projectID] });
+      qc.invalidateQueries({ queryKey: ["runs", projectID] });
+    }
+  }, [lastEvent, qc, projectID, runID]);
 
   if (runQ.isLoading) return <Spinner />;
   if (runQ.isError) return <ErrorMessage>{(runQ.error as Error).message}</ErrorMessage>;

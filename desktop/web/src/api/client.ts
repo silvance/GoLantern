@@ -148,7 +148,16 @@ export const api = {
     request<{
       project: Project;
       summary: { entities_total: number; findings_total: number; runs_total: number };
-      findings: Finding[];
+      findings: (Finding & {
+        evidence?: Array<{
+          id: string;
+          source_tool: string;
+          source_category: string;
+          confidence: string;
+          payload?: Record<string, unknown>;
+          notes?: string;
+        }>;
+      })[];
       entities_by_kind: Record<string, Entity[]>;
       runs: Run[];
     }>(`/api/v1/projects/${projectID}/report?format=json`),
@@ -156,6 +165,8 @@ export const api = {
   listArtifacts: (projectID: string) =>
     request<Artifact[]>(`/api/v1/projects/${projectID}/artifacts`),
   artifactURL: (id: string) => `${API_BASE}/api/v1/artifacts/${id}`,
+  reportURL: (projectID: string, format: "html" | "csv" | "pdf" | "docx" | "json") =>
+    `${API_BASE}/api/v1/projects/${projectID}/report?format=${format}`,
 
   listAuditLogs: (projectID: string) =>
     request<AuditLog[]>(`/api/v1/projects/${projectID}/audit-logs`),

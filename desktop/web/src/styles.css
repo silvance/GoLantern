@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Switch `dark:` to a class-based strategy so the ThemeToggle can
+ * override the OS preference. The toggle writes `.dark` on <html>;
+ * unsetting falls back to OS via the second selector. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Custom design tokens layered on top of Tailwind. Keep this short:
  * everything that can be a utility class should be one. This file is
  * for app-wide tweaks that don't fit cleanly in a class. */

@@ -5,6 +5,7 @@ import NewProjectPage from "./pages/NewProjectPage";
 import RunDetailPage from "./pages/RunDetailPage";
 import DoctorPage from "./pages/DoctorPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 export default function App() {
   return (
@@ -37,7 +38,7 @@ function Header() {
         <Link to="/" className="font-semibold text-lg">
           GoLantern
         </Link>
-        <nav className="flex gap-4 text-sm">
+        <nav className="flex gap-4 text-sm flex-1">
           <NavLink
             to="/"
             end
@@ -70,6 +71,7 @@ function Header() {
             Doctor
           </NavLink>
         </nav>
+        <ThemeToggle />
       </div>
     </header>
   );

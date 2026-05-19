@@ -102,9 +102,12 @@ export default function ProjectDetailPage() {
               </Button>
             </>
           ) : (
-            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-              Delete project
-            </Button>
+            <>
+              <ReportDownload projectID={projectID} />
+              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete project
+              </Button>
+            </>
           )
         }
       >
@@ -143,5 +146,44 @@ export default function ProjectDetailPage() {
       {tab === "assistant" && <AssistantTab projectID={projectID} />}
       {tab === "audit" && <AuditTab projectID={projectID} />}
     </div>
+  );
+}
+
+// ReportDownload is a small <details> dropdown of the supported
+// report formats. Each option is a plain <a download> link so the
+// browser fetches and saves the file without any SPA round-trip.
+function ReportDownload({ projectID }: { projectID: string }) {
+  const formats: Array<{
+    key: "html" | "csv" | "pdf" | "docx" | "json";
+    label: string;
+  }> = [
+    { key: "pdf", label: "PDF" },
+    { key: "docx", label: "DOCX" },
+    { key: "html", label: "HTML" },
+    { key: "csv", label: "CSV" },
+    { key: "json", label: "JSON" },
+  ];
+  return (
+    <details className="relative">
+      <summary className="list-none cursor-pointer inline-flex items-center justify-center px-3 py-1.5 rounded-md text-sm font-medium bg-slate-200 text-slate-900 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600">
+        Download report ▾
+      </summary>
+      <div className="absolute right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md shadow-lg z-10 min-w-[140px]">
+        <ul className="py-1 text-sm">
+          {formats.map((f) => (
+            <li key={f.key}>
+              <a
+                href={api.reportURL(projectID, f.key)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                {f.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
