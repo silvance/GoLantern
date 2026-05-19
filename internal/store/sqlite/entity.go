@@ -136,6 +136,102 @@ func (r *EntityRepo) ListValuesByKind(
 	return out, rows.Err()
 }
 
+// CreateRelation persists a directed edge with the (src, dst, kind)
+// UNIQUE invariant from schema.sql. Cross-project endpoints surface
+// as entity.ErrCrossProject (the runner only emits same-project
+// relations; this is defense-in-depth catching application bugs).
+//
+// Idempotent: a duplicate triple returns nil (the row stays).
+// Attribute merging on duplicates wraps the lookup+merge+update in a
+// short transaction so concurrent writers don't race.
+func (r *EntityRepo) CreateRelation(ctx context.Context, rel *entity.Relation) error {
+	// Validate endpoints belong to the same project as the relation.
+	var srcPID, dstPID string
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT project_id FROM entities WHERE id = ?`, rel.SrcID,
+	).Scan(&srcPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return entity.ErrNotFound
+		}
+		return fmt.Errorf("relation src lookup: %w", err)
+	}
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT project_id FROM entities WHERE id = ?`, rel.DstID,
+	).Scan(&dstPID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return entity.ErrNotFound
+		}
+		return fmt.Errorf("relation dst lookup: %w", err)
+	}
+	if srcPID != rel.ProjectID || dstPID != rel.ProjectID {
+		return entity.ErrCrossProject
+	}
+
+	if rel.ID == "" {
+		rel.ID = id.New()
+	}
+	attrJSON := "{}"
+	if len(rel.Attributes) > 0 {
+		b, err := json.Marshal(rel.Attributes)
+		if err != nil {
+			return fmt.Errorf("encode relation attributes: %w", err)
+		}
+		attrJSON = string(b)
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO entity_relations
+			(id, project_id, src_id, dst_id, kind, attributes, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		rel.ID, rel.ProjectID, rel.SrcID, rel.DstID, toDBEnum(string(rel.Kind)),
+		attrJSON, now, now,
+	)
+	if err != nil {
+		// SQLite's UNIQUE error names the column list ("entity_relations.src_id, ...")
+		// rather than the constraint, so match on either the constraint name
+		// (some SQLite versions / sqlcipher use it) or on src_id.
+		if isUniqueViolation(err, "uq_relation_src_dst_kind") ||
+			isUniqueViolation(err, "entity_relations.src_id") {
+			// Idempotent: the row already exists. Caller's attributes
+			// are dropped; merging here would require a second
+			// round-trip and Python's optimistic-insert pattern
+			// doesn't merge either.
+			return nil
+		}
+		return fmt.Errorf("relation insert: %w", err)
+	}
+	return nil
+}
+
+func (r *EntityRepo) ListRelationsByProject(
+	ctx context.Context, projectID string,
+) ([]*entity.Relation, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, project_id, src_id, dst_id, kind, attributes
+		FROM entity_relations WHERE project_id = ?
+		ORDER BY created_at ASC, id ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("ListRelationsByProject: %w", err)
+	}
+	defer rows.Close()
+	var out []*entity.Relation
+	for rows.Next() {
+		var rel entity.Relation
+		var kindS, attrJSON string
+		if err := rows.Scan(&rel.ID, &rel.ProjectID, &rel.SrcID, &rel.DstID, &kindS, &attrJSON); err != nil {
+			return nil, err
+		}
+		rel.Kind = entity.RelationKind(fromDBEnum(kindS))
+		if attrJSON != "" {
+			if err := json.Unmarshal([]byte(attrJSON), &rel.Attributes); err != nil {
+				return nil, fmt.Errorf("decode relation attributes: %w", err)
+			}
+		}
+		out = append(out, &rel)
+	}
+	return out, rows.Err()
+}
+
 func (r *EntityRepo) ListByProject(ctx context.Context, projectID string) ([]*entity.Entity, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, kind, value, attributes

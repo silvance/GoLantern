@@ -49,7 +49,25 @@ type Repository interface {
 	// insertion order. Used by report generation; renderers group
 	// by kind client-side.
 	ListByProject(ctx context.Context, projectID string) ([]*Entity, error)
+
+	// CreateRelation persists a directed edge between two entities.
+	// Idempotent: a duplicate (src_id, dst_id, kind) is silently
+	// accepted (the row stays unique). Implementations enforce the
+	// same-project invariant for both endpoints; cross-project
+	// relations are rejected with ErrCrossProject so a buggy
+	// collector can't link entities across project boundaries.
+	CreateRelation(ctx context.Context, r *Relation) error
+
+	// ListRelationsByProject returns every relation row in the
+	// project, ordered by insertion. Used by report generation
+	// and graph-visualization UIs.
+	ListRelationsByProject(ctx context.Context, projectID string) ([]*Relation, error)
 }
+
+// ErrCrossProject is returned by CreateRelation when the relation's
+// endpoints don't both belong to the relation's ProjectID. Mirrors
+// the Python flush-time CrossProjectRelationError.
+var ErrCrossProject = errors.New("entity: relation endpoints span projects")
 
 // Kind enumerates entity kinds. Mirrors lantern's EntityKind. String
 // values are wire format.

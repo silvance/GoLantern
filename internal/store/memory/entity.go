@@ -20,13 +20,23 @@ type EntityRepo struct {
 	byID   map[string]*entity.Entity
 	byKey  map[string]string // "projectID|kind|value" -> id
 	byProj map[string][]string
+
+	// relations indexed by (src_id, dst_id, kind) -- the same UNIQUE
+	// triple SQLite's schema declares -- so duplicate-insert is an
+	// O(1) check.
+	relByID   map[string]*entity.Relation
+	relByKey  map[string]string // "src|dst|kind" -> id
+	relByProj map[string][]string
 }
 
 func NewEntityRepo() *EntityRepo {
 	return &EntityRepo{
-		byID:   make(map[string]*entity.Entity),
-		byKey:  make(map[string]string),
-		byProj: make(map[string][]string),
+		byID:      make(map[string]*entity.Entity),
+		byKey:     make(map[string]string),
+		byProj:    make(map[string][]string),
+		relByID:   make(map[string]*entity.Relation),
+		relByKey:  make(map[string]string),
+		relByProj: make(map[string][]string),
 	}
 }
 
@@ -109,6 +119,58 @@ func copyMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// CreateRelation persists a directed edge. Enforces same-project on
+// both endpoints (matching the SQLite FK + the Python flush hook) and
+// is idempotent on the (src, dst, kind) triple.
+func (r *EntityRepo) CreateRelation(_ context.Context, rel *entity.Relation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	src, hasSrc := r.byID[rel.SrcID]
+	dst, hasDst := r.byID[rel.DstID]
+	if !hasSrc || !hasDst {
+		return entity.ErrNotFound
+	}
+	if src.ProjectID != rel.ProjectID || dst.ProjectID != rel.ProjectID {
+		return entity.ErrCrossProject
+	}
+
+	key := rel.SrcID + "|" + rel.DstID + "|" + string(rel.Kind)
+	if existing, ok := r.relByKey[key]; ok {
+		// Idempotent: merge attributes into the existing row rather
+		// than failing. Mirrors the Python optimistic-insert pattern
+		// which catches IntegrityError and treats it as already-present.
+		if len(rel.Attributes) > 0 {
+			r.relByID[existing].Attributes = fact.MergeAttributes(
+				r.relByID[existing].Attributes, rel.Attributes,
+			)
+		}
+		return nil
+	}
+	if rel.ID == "" {
+		rel.ID = id.New()
+	}
+	clone := *rel
+	clone.Attributes = copyMap(rel.Attributes)
+	r.relByID[rel.ID] = &clone
+	r.relByKey[key] = rel.ID
+	r.relByProj[rel.ProjectID] = append(r.relByProj[rel.ProjectID], rel.ID)
+	return nil
+}
+
+func (r *EntityRepo) ListRelationsByProject(_ context.Context, projectID string) ([]*entity.Relation, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := r.relByProj[projectID]
+	out := make([]*entity.Relation, 0, len(ids))
+	for _, rid := range ids {
+		clone := *r.relByID[rid]
+		clone.Attributes = copyMap(clone.Attributes)
+		out = append(out, &clone)
+	}
+	return out, nil
 }
 
 var _ entity.Repository = (*EntityRepo)(nil)

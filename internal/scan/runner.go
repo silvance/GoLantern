@@ -334,17 +334,21 @@ func (p *persistingContext) EmitEntity(f fact.EntityFact) (string, error) {
 }
 
 func (p *persistingContext) EmitRelation(f fact.RelationFact) error {
-	// Relation persistence (entity_relations table) is not yet
-	// ported. Phase 4 scaffold accepts the call and counts the
-	// endpoint entities to keep them deduped; the actual edge will
-	// land when the entity_relations repository ships.
-	if _, err := p.upsertEntity(f.Src.Kind, f.Src.Value, nil); err != nil {
+	srcID, err := p.upsertEntity(f.Src.Kind, f.Src.Value, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := p.upsertEntity(f.Dst.Kind, f.Dst.Value, nil); err != nil {
+	dstID, err := p.upsertEntity(f.Dst.Kind, f.Dst.Value, nil)
+	if err != nil {
 		return err
 	}
-	return nil
+	return p.runner.deps.Entities.CreateRelation(p.baseCtx, &entity.Relation{
+		ProjectID:  p.projectID,
+		SrcID:      srcID,
+		DstID:      dstID,
+		Kind:       f.Kind,
+		Attributes: f.Attributes,
+	})
 }
 
 func (p *persistingContext) EmitEvidence(f fact.EvidenceFact) error {

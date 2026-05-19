@@ -14,7 +14,12 @@ import (
 
 func seedProject(t *testing.T, st *Store) *project.Project {
 	t.Helper()
-	p := &project.Project{Name: "P", DefaultScope: scope.KindLightActive, Mode: project.ModeAssessment}
+	return seedProjectNamed(t, st, "P")
+}
+
+func seedProjectNamed(t *testing.T, st *Store, name string) *project.Project {
+	t.Helper()
+	p := &project.Project{Name: name, DefaultScope: scope.KindLightActive, Mode: project.ModeAssessment}
 	if err := st.Projects.Save(ctx(), p); err != nil {
 		t.Fatal(err)
 	}

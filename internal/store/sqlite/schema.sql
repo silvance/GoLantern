@@ -115,6 +115,30 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS ix_entities_project_kind ON entities(project_id, kind);
 
+-- Entity relations: directed edges between two entities within ONE
+-- project. project_id on the row is defense-in-depth (the runner only
+-- emits same-project relations; the column lets queries filter
+-- without joining through entities, and lets cascade-delete sweep
+-- relations even when both endpoints are mid-detach). Same-project
+-- invariant is enforced application-side because SQLite can't express
+-- a composite FK across two columns without contortion.
+CREATE TABLE IF NOT EXISTS entity_relations (
+    id         VARCHAR(32) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    src_id     VARCHAR(32) NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    dst_id     VARCHAR(32) NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    kind       VARCHAR(32) NOT NULL
+        CHECK (kind IN ('RESOLVES_TO','HOSTS','SERVES','BELONGS_TO','AUTHORED',
+                        'USES_TECH','CHILD_OF','REFERENCES','DISCOVERED_FROM')),
+    attributes TEXT NOT NULL DEFAULT '{}',  -- JSON
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uq_relation_src_dst_kind UNIQUE (src_id, dst_id, kind)
+);
+CREATE INDEX IF NOT EXISTS ix_entity_relations_src ON entity_relations(src_id);
+CREATE INDEX IF NOT EXISTS ix_entity_relations_dst ON entity_relations(dst_id);
+CREATE INDEX IF NOT EXISTS ix_entity_relations_project ON entity_relations(project_id);
+
 -- Findings: analyst-facing. Severity / Confidence enums stored as
 -- SQLAlchemy member names. The Python head schema carries reportable /
 -- reviewed / cvss_* / reproduction_steps columns from later

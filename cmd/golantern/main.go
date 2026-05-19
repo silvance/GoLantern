@@ -22,6 +22,7 @@ import (
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scan"
+	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
@@ -94,6 +95,7 @@ func cmdServe(args []string) error {
 	// get wired; new collectors register here as they land.
 	reg := scan.NewRegistry()
 	reg.Register(fixture.Name, fixture.New)
+	reg.Register(crtsh.Name, crtsh.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
