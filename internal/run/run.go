@@ -10,10 +10,15 @@
 package run
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/silvance/golantern/internal/workflow"
 )
+
+// ErrNotFound is returned by Repository lookups that miss.
+var ErrNotFound = errors.New("run: not found")
 
 // Status is the lifecycle state of a Run.
 type Status string
@@ -121,6 +126,23 @@ type Run struct {
 
 	ErrorSummary string
 	ErrorDebug   string
+}
+
+// Repository persists Run and ToolExecution rows. The engine
+// (later phase) uses this; HTTP handlers use it directly for reads.
+//
+// ListByProject orders newest-first to match the Python "Runs" UI; the
+// in-memory store mirrors that and the SQLite store sorts by created_at
+// DESC. Save is upsert: callers that need to distinguish create from
+// update should check ID first.
+type Repository interface {
+	Get(ctx context.Context, id string) (*Run, error)
+	ListByProject(ctx context.Context, projectID string) ([]*Run, error)
+	Save(ctx context.Context, r *Run) error
+	Delete(ctx context.Context, id string) error
+
+	SaveToolExecution(ctx context.Context, tx *ToolExecution) error
+	ListToolExecutions(ctx context.Context, runID string) ([]*ToolExecution, error)
 }
 
 // ToolExecution is one collector invocation inside a Run.

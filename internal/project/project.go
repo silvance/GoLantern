@@ -9,6 +9,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -59,6 +60,33 @@ type Project struct {
 // ErrInvalid is the sentinel for input-validation failures. Callers
 // can use errors.Is to distinguish bad input from infra errors.
 var ErrInvalid = errors.New("invalid project")
+
+// ErrNotFound is returned by Repository.Get when no project matches the
+// requested ID. Other repository methods may also return it (e.g.
+// Delete of an absent id is a no-op-or-error decision left to the
+// implementation; the in-memory store returns ErrNotFound).
+var ErrNotFound = errors.New("project: not found")
+
+// ErrDuplicate is returned by Repository.Save when a project name
+// conflicts with an existing row (the Python schema declares Name
+// UNIQUE; we preserve that invariant at the repository boundary).
+var ErrDuplicate = errors.New("project: duplicate")
+
+// Repository is the persistence contract for projects. Lives in this
+// package (the consumer of the type) rather than in the storage layer
+// so the domain owns the shape of its persistence calls.
+//
+// Save is upsert: it creates a row when ID is empty and updates when
+// it isn't. Implementations are responsible for populating ID on
+// create. This matches how the FastAPI handlers call WorkflowEngine /
+// the session today and removes the "is this an insert or update?"
+// branch from every caller.
+type Repository interface {
+	Get(ctx context.Context, id string) (*Project, error)
+	List(ctx context.Context) ([]*Project, error)
+	Save(ctx context.Context, p *Project) error
+	Delete(ctx context.Context, id string) error
+}
 
 // Validate checks the invariants a Project must satisfy before being
 // persisted. ID is populated by the store; an empty ID is fine at

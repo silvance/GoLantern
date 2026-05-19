@@ -8,6 +8,7 @@
 package scope
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -63,6 +64,34 @@ func (k RuleKind) rank() int {
 type Rule struct {
 	Pattern string
 	Kind    RuleKind
+}
+
+// StoredRule is a persisted Rule with its identity columns. Use Rule
+// for inputs (e.g. compilation), StoredRule for repository round-trips.
+type StoredRule struct {
+	ID        string
+	ProjectID string
+	Rule      Rule
+	Note      string
+}
+
+// ErrNotFound is returned by Repository when a lookup misses.
+var ErrNotFound = errors.New("scope: not found")
+
+// ErrDuplicate is returned when a (project_id, pattern) pair would
+// collide. The Python schema declares that pair UNIQUE.
+var ErrDuplicate = errors.New("scope: duplicate")
+
+// Repository persists scope rules. Implementations live in
+// internal/store/*.
+//
+// ListByProject must return rules in a stable order so policy
+// compilation is deterministic across calls. Implementations typically
+// order by creation timestamp or by ID.
+type Repository interface {
+	ListByProject(ctx context.Context, projectID string) ([]StoredRule, error)
+	Add(ctx context.Context, sr *StoredRule) error
+	Delete(ctx context.Context, ruleID string) error
 }
 
 // ErrOutOfScope is returned by Policy.Require when the target is not
