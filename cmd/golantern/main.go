@@ -26,8 +26,10 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
 	"github.com/silvance/golantern/internal/scan/collectors/dnsx"
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
+	"github.com/silvance/golantern/internal/scan/collectors/ffuf"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
+	"github.com/silvance/golantern/internal/scan/collectors/historicalurls"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
 	"github.com/silvance/golantern/internal/scan/collectors/nuclei"
@@ -106,7 +108,9 @@ func cmdServe(args []string) error {
 	reg.Register(crtsh.Name, crtsh.New)
 	reg.Register(dnsx.Name, dnsx.New)
 	reg.Register(emailsec.Name, emailsec.New)
+	reg.Register(ffuf.Name, ffuf.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
+	reg.Register(historicalurls.Name, historicalurls.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
 	reg.Register(nmap.Name, nmap.New)
 	reg.Register(nuclei.Name, nuclei.New)
