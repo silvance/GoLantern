@@ -24,11 +24,14 @@ import (
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scan"
 	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
+	"github.com/silvance/golantern/internal/scan/collectors/dnsx"
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
+	"github.com/silvance/golantern/internal/scan/collectors/nuclei"
+	"github.com/silvance/golantern/internal/scan/collectors/subfinder"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
 	"github.com/silvance/golantern/internal/store/sqlite"
@@ -101,10 +104,13 @@ func cmdServe(args []string) error {
 	reg := scan.NewRegistry()
 	reg.Register(fixture.Name, fixture.New)
 	reg.Register(crtsh.Name, crtsh.New)
+	reg.Register(dnsx.Name, dnsx.New)
 	reg.Register(emailsec.Name, emailsec.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
 	reg.Register(nmap.Name, nmap.New)
+	reg.Register(nuclei.Name, nuclei.New)
+	reg.Register(subfinder.Name, subfinder.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
