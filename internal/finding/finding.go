@@ -6,6 +6,26 @@
 // here so a future severity addition only needs to update one place.
 package finding
 
+import (
+	"context"
+	"errors"
+)
+
+// ErrNotFound is returned by Repository lookups that miss.
+var ErrNotFound = errors.New("finding: not found")
+
+// Repository persists findings and the evidence rows attached to them
+// (or attached directly to entities). Findings and evidence share a
+// repository because the runner emits them in lockstep — a finding
+// with supporting entities produces both kinds of rows in the same
+// flush.
+type Repository interface {
+	CreateFinding(ctx context.Context, f *Finding) error
+	CreateEvidence(ctx context.Context, e *Evidence) error
+	ListFindings(ctx context.Context, projectID string) ([]*Finding, error)
+	ListEvidence(ctx context.Context, projectID string) ([]*Evidence, error)
+}
+
 // Severity is the analyst-facing finding severity.
 type Severity string
 

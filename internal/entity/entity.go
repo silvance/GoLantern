@@ -8,10 +8,43 @@
 package entity
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"net/url"
 	"strings"
 )
+
+// ErrNotFound is returned by Repository lookups that miss.
+var ErrNotFound = errors.New("entity: not found")
+
+// Repository persists entities and their attributes with per-project,
+// per-(kind, value) dedup. Upsert is the only write method the runner
+// needs at the entity layer: the canonicalized value is the natural
+// key, and conflicting attributes merge rather than overwriting (older
+// evidence wins on scalar conflicts, list-valued attributes union).
+//
+// The merge happens inside the repository so the runner doesn't have
+// to round-trip read-modify-write for every emission. Implementations
+// must use the (project_id, kind, canonical_value) uniqueness rule.
+type Repository interface {
+	// Upsert finds or creates the row keyed by (projectID, kind,
+	// canonicalValue). When found, attributes are merged in place via
+	// fact.MergeAttributes semantics. Returns the entity ID either way.
+	//
+	// Callers are responsible for canonicalizing value via
+	// Canonicalize(kind, raw) before calling — passing a raw value
+	// would silently create duplicates. Putting the canonicalization
+	// in the repo would tempt callers to skip it for relation
+	// endpoints (where the cost of re-canonicalizing is wasted).
+	Upsert(ctx context.Context, projectID string, kind Kind, canonicalValue string, attributes map[string]any) (id string, err error)
+
+	// ListValuesByKind returns every entity value of kind for the
+	// project. Used by ctx.list_entity_values so later-phase
+	// collectors can consume earlier-phase output (e.g. dnsx
+	// resolving subdomains found by crt.sh).
+	ListValuesByKind(ctx context.Context, projectID string, kind Kind) ([]string, error)
+}
 
 // Kind enumerates entity kinds. Mirrors lantern's EntityKind. String
 // values are wire format.
