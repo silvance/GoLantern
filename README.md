@@ -11,13 +11,10 @@ See `docs/ARCHITECTURE.md` for the design analysis and migration plan.
 
 - HTTP API at `:8000` covering projects, scope rules, runs, scan
   results, audit log, and reports.
-- Six working collectors right now: `fixture` (synthetic, for demos),
-  `crtsh` (subdomain discovery via certificate transparency),
-  `email_security` (SPF / DMARC / DKIM / MX posture, DNS-only),
-  `github_repos` (enumerate an org's public repositories),
-  `nmap` (port and service discovery, requires the `nmap` binary on PATH),
-  and `httpx_probe` (HTTP liveness + title + tech, wraps ProjectDiscovery's
-  `httpx` binary).
+- 21 working collectors spanning every workflow phase (OSINT → Asset
+  Discovery → Validation → Exposure → Enrichment). See
+  `docs/COLLECTORS.md` for the full list and the documented set of
+  Python collectors GoLantern deliberately doesn't port.
 - In-process scan queue with N workers. Scan output is persisted; a
   server restart keeps your data.
 - Server-Sent Events stream at `/api/v1/runs/{id}/events` for live run
