@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GoLantern</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>GoLantern</h1>
+      <p class="lede">Backend is running on <code id="api-base">http://127.0.0.1:8765</code></p>
+    </header>
+
+    <section id="status">
+      <h2>Health check</h2>
+      <p>Probe the backend's <code>/healthz</code> endpoint:</p>
+      <button id="probe-btn">Probe /healthz</button>
+      <pre id="probe-out">(idle)</pre>
+    </section>
+
+    <section id="projects">
+      <h2>Projects</h2>
+      <button id="reload-projects">Reload</button>
+      <ul id="project-list"></ul>
+    </section>
+
+    <section id="readme">
+      <h2>About this UI</h2>
+      <p>
+        This is a placeholder shell — enough to confirm the Tauri webview and
+        the Go backend talk to each other end to end. A real SPA (React + Vite
+        is the planned stack) will replace this dist/ at a later phase. Until
+        then the curl-friendly REST API is the primary interface; see
+        <code>README.md</code> at the repo root for the endpoint tour.
+      </p>
+    </section>
+  </main>
+  <script src="assets/app.js"></script>
+</body>
+</html>

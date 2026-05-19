@@ -217,6 +217,20 @@ docs/
 
 ---
 
+## Desktop shell
+
+`desktop/` contains the Tauri 2 wrapper. It spawns the `golantern`
+binary as a sidecar, waits for `/healthz`, and opens a webview at the
+bundled frontend. See `desktop/README.md` for build instructions; the
+short version is `go build -o desktop/src-tauri/binaries/golantern ./cmd/golantern`
+followed by `cd desktop/src-tauri && cargo tauri build`.
+
+Dev mode (`cargo tauri dev`) skips the build step and runs the backend
+via `go run`, so source-checkout iteration doesn't need a packaged
+binary.
+
+---
+
 ## Tests
 
 ```sh

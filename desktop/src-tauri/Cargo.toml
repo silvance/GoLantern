@@ -1,0 +1,25 @@
+[package]
+name = "golantern-desktop"
+version = "0.1.0"
+description = "GoLantern desktop shell - hosts the GoLantern backend as a sidecar"
+authors = ["Silvance"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# We ship the devtools feature unconditionally for now. Cost is small,
+# benefit (operator-side debugging without rebuilding) is real. Revisit
+# before a 1.0 if binary size becomes a concern.
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "sync", "rt-multi-thread", "macros", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+
+[features]
+default = []

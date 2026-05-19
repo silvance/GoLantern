@@ -1,0 +1,8 @@
+# This directory holds the cross-compiled `golantern` binary that
+# `tauri.conf.json`'s `externalBin` entry expects. Populate it with
+# `go build -o desktop/src-tauri/binaries/golantern ./cmd/golantern`
+# (or the GOOS/GOARCH variant for cross-compilation) before
+# `cargo tauri build`.
+#
+# Built binaries are intentionally not committed — see
+# `desktop/src-tauri/.gitignore`.

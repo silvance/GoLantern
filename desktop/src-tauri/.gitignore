@@ -1,0 +1,15 @@
+# Cargo build artifacts.
+target/
+
+# Cross-compiled Go binaries staged for Tauri bundling. We keep the
+# directory (via .gitkeep) but never commit the built binaries — they
+# vary by platform and are reproducible from the Go source.
+binaries/golantern
+binaries/golantern.exe
+binaries/golantern-*
+
+# Tauri-generated icons. Source icon (when added) lives at
+# icons/source.svg; the generated files are reproducible from it.
+icons/icon.icns
+icons/icon.ico
+icons/*.png
