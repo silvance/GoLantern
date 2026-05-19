@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -123,6 +124,7 @@ func New(
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/info", s.handleInfo)
 	mux.HandleFunc("GET /api/v1/projects", s.handleListProjects)
 	mux.HandleFunc("POST /api/v1/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}", s.handleGetProject)
@@ -528,6 +530,30 @@ type assistantAskResponse struct {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleInfo returns server-level metadata: feature flags, registered
+// collector count, server time, and Go runtime info. Used by the
+// SPA's About page so operators can verify what's wired without
+// trawling logs.
+func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
+	collectorCount := 0
+	if s.Registry != nil {
+		collectorCount = len(s.Registry.Names())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"go_version":         runtime.Version(),
+		"server_time":        time.Now().UTC(),
+		"collector_count":    collectorCount,
+		"features": map[string]bool{
+			"assistant":     s.Assistant != nil,
+			"artifacts":     s.Artifacts != nil && s.ArtifactStore != nil,
+			"event_bus":     s.Bus != nil,
+			"enqueue":       s.Enqueue != nil,
+			"webui":         s.WebUI != nil,
+			"entity_report": s.Entities != nil && s.Findings != nil,
+		},
+	})
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {

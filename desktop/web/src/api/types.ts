@@ -173,6 +173,20 @@ export interface RecommendedToolsResponse {
   tools: string[];
 }
 
+export interface ServerInfo {
+  go_version: string;
+  server_time: string;
+  collector_count: number;
+  features: {
+    assistant: boolean;
+    artifacts: boolean;
+    event_bus: boolean;
+    enqueue: boolean;
+    webui: boolean;
+    entity_report: boolean;
+  };
+}
+
 export interface DoctorEntry {
   name: string;
   phase: Phase;

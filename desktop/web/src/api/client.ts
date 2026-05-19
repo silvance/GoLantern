@@ -17,6 +17,7 @@ import type {
   Project,
   RecommendedToolsResponse,
   Run,
+  ServerInfo,
   ScopeKind,
   ScopeRule,
   ScopeTestResult,
@@ -189,4 +190,5 @@ export const api = {
     ),
 
   health: () => request<{ status: string }>("/healthz"),
+  info: () => request<ServerInfo>("/api/v1/info"),
 };

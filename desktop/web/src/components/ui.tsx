@@ -2,7 +2,14 @@
 // repeat the same long class strings. Keep these dumb — no data
 // fetching, no router awareness.
 
-import { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import {
+  ReactNode,
+  Ref,
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from "react";
 
 export function Button({
   variant = "primary",
@@ -26,9 +33,14 @@ export function Button({
   return <button className={`${base} ${styles[variant]} ${className}`} {...rest} />;
 }
 
-export function Input({ className = "", ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({
+  className = "",
+  ref,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
   return (
     <input
+      ref={ref}
       className={`px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${className}`}
       {...rest}
     />

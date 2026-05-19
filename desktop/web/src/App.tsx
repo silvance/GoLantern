@@ -4,6 +4,7 @@ import ProjectDetailPage from "./pages/ProjectDetailPage";
 import NewProjectPage from "./pages/NewProjectPage";
 import RunDetailPage from "./pages/RunDetailPage";
 import DoctorPage from "./pages/DoctorPage";
+import AboutPage from "./pages/AboutPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 
@@ -21,6 +22,7 @@ export default function App() {
             element={<RunDetailPage />}
           />
           <Route path="/doctor" element={<DoctorPage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
@@ -69,6 +71,16 @@ function Header() {
             }
           >
             Doctor
+          </NavLink>
+          <NavLink
+            to="/about"
+            className={({ isActive }) =>
+              isActive
+                ? "text-blue-600 dark:text-blue-400 font-medium"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+            }
+          >
+            About
           </NavLink>
         </nav>
         <ThemeToggle />

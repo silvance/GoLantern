@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
@@ -21,6 +21,28 @@ export default function ProjectsPage() {
   const [filter, setFilter] = useState("");
   const [modeFilter, setModeFilter] = useState<Mode | "all">("all");
   const [sort, setSort] = useState<SortKey>("name");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // "/" focuses the search box, unless the user is already typing in
+  // an input. Standard pattern for search-driven analyst tools.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          (t as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const filtered = useMemo(() => {
     const lc = filter.toLowerCase();
@@ -62,9 +84,10 @@ export default function ProjectsPage() {
         <>
           <div className="flex flex-wrap gap-3 mb-4">
             <Input
+              ref={searchRef}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name, organization, description..."
+              placeholder="Filter — press / to focus"
               className="w-72"
             />
             <Select
