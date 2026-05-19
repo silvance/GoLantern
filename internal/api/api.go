@@ -13,6 +13,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,26 @@ type Server struct {
 	Runs     run.Repository
 	Audit    audit.Repository
 	Logger   *slog.Logger
+
+	// Enqueue is the run-dispatch hook. When nil, POST /runs with a
+	// non-empty tools list returns 501 (Phase 4 behaviour). When set
+	// (Phase 5+), the handler enqueues and returns 201 — the queue's
+	// worker drives the run to a terminal status asynchronously.
+	//
+	// Injected as a function so the api package has no dependency on
+	// the queue package. cmd/golantern wires the two.
+	Enqueue EnqueueFunc
 }
+
+// EnqueueFunc dispatches a Run for asynchronous execution by the job
+// queue. ctx is the request context; the queue is free to detach if
+// the work outlives the request.
+type EnqueueFunc func(ctx context.Context, runID string, invocations []ToolInvocation) error
+
+// ToolInvocation is the request-shape for a single tool to run inside
+// a Run. We re-export the JSON DTO as the public type for EnqueueFunc
+// so the queue package needn't import the api package's internals.
+type ToolInvocation = toolInvocation
 
 // New constructs a Server with sensible defaults. Logger defaults to
 // slog.Default when nil.
@@ -599,14 +619,6 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Tools) > 0 {
-		writeJSON(w, http.StatusNotImplemented, errorBody(
-			"tool dispatch not yet ported: pass tools=[] to create an empty run, "+
-				"or wait for the queue to land in Phase 5"))
-		return
-	}
-
-	now := time.Now().UTC()
 	params := req.Parameters
 	if params == nil {
 		params = map[string]any{}
@@ -633,27 +645,54 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	// Empty tools list: mark COMPLETED inline. Python's create_run uses
-	// the same shortcut so phases like SCOPE (no collectors) can be
-	// declared done without queueing a no-op job.
-	ru.Status = run.StatusCompleted
-	ru.StartedAt = &now
-	ru.FinishedAt = &now
-	if err := s.Runs.Save(r.Context(), ru); err != nil {
-		s.writeError(w, r, err)
+	if len(req.Tools) == 0 {
+		// Empty tools: Python's "intentional skip" shortcut. Mark
+		// COMPLETED inline so phases like SCOPE (no collectors) can be
+		// declared done without a queue round trip.
+		now := time.Now().UTC()
+		ru.Status = run.StatusCompleted
+		ru.StartedAt = &now
+		ru.FinishedAt = &now
+		if err := s.Runs.Save(r.Context(), ru); err != nil {
+			s.writeError(w, r, err)
+			return
+		}
+		_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+			ProjectID:           projectID,
+			ProjectNameSnapshot: p.Name,
+			Action:              audit.ActionRunFinished,
+			Target:              ru.ID,
+			Detail: map[string]any{
+				"status": string(ru.Status),
+				"phase":  string(ru.Phase),
+			},
+		})
+		writeJSON(w, http.StatusCreated, toRunDTO(ru))
 		return
 	}
-	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
-		ProjectID:           projectID,
-		ProjectNameSnapshot: p.Name,
-		Action:              audit.ActionRunFinished,
-		Target:              ru.ID,
-		Detail: map[string]any{
-			"status": string(ru.Status),
-			"phase":  string(ru.Phase),
-		},
-	})
 
+	// Non-empty tools: enqueue for asynchronous dispatch. The run
+	// stays PENDING until the worker picks it up; clients watch the
+	// run's status via GET /runs/{id} (SSE event streams land later).
+	if s.Enqueue == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"tool dispatch not configured on this server"))
+		return
+	}
+	if err := s.Enqueue(r.Context(), ru.ID, req.Tools); err != nil {
+		s.Logger.WarnContext(r.Context(), "enqueue failed",
+			slog.String("run_id", ru.ID), slog.Any("err", err))
+		// Roll back the optimistic Run state so a queue-full or
+		// queue-shutting-down condition surfaces as 503 instead of
+		// leaving a PENDING run that will never advance.
+		ru.Status = run.StatusFailed
+		now := time.Now().UTC()
+		ru.FinishedAt = &now
+		ru.ErrorSummary = fmt.Sprintf("enqueue failed: %v", err)
+		_ = s.Runs.Save(r.Context(), ru)
+		writeJSON(w, http.StatusServiceUnavailable, errorBody("queue unavailable"))
+		return
+	}
 	writeJSON(w, http.StatusCreated, toRunDTO(ru))
 }
 
