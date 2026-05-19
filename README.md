@@ -11,10 +11,11 @@ See `docs/ARCHITECTURE.md` for the design analysis and migration plan.
 
 - HTTP API at `:8000` covering projects, scope rules, runs, scan
   results, audit log, and reports.
-- Four working collectors right now: `fixture` (synthetic, for demos),
+- Five working collectors right now: `fixture` (synthetic, for demos),
   `crtsh` (subdomain discovery via certificate transparency),
-  `email_security` (SPF / DMARC / DKIM / MX posture, DNS-only), and
-  `github_repos` (enumerate an org's public repositories).
+  `email_security` (SPF / DMARC / DKIM / MX posture, DNS-only),
+  `github_repos` (enumerate an org's public repositories), and
+  `nmap` (port and service discovery, requires the `nmap` binary on PATH).
 - In-process scan queue with N workers. Scan output is persisted; a
   server restart keeps your data.
 - Server-Sent Events stream at `/api/v1/runs/{id}/events` for live run
@@ -197,7 +198,9 @@ internal/
       crtsh/          — certificate transparency
       emailsec/       — SPF / DMARC / DKIM / MX
       githubrepos/    — GitHub org repository enumeration
+      nmap/           — port + service discovery (wraps the nmap CLI)
   scope/              — scope policy matcher
+  subprocess/         — shared CLI invocation: timeout, BinaryNotFoundError, stderr-tail
   store/
     memory/           — in-memory repository implementations
     sqlite/           — SQLite implementations + embedded schema
