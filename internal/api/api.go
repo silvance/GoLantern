@@ -415,8 +415,30 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)
+	case "pdf":
+		out, err := report.RenderPDF(b)
+		if err != nil {
+			s.writeError(w, r, err)
+			return
+		}
+		filename := fmt.Sprintf("lantern-report-%s.pdf", b.Project.ID)
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
+	case "docx":
+		out, err := report.RenderDOCX(b)
+		if err != nil {
+			s.writeError(w, r, err)
+			return
+		}
+		filename := fmt.Sprintf("lantern-report-%s.docx", b.Project.ID)
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(out)
 	default:
-		writeJSON(w, http.StatusBadRequest, errorBody("format must be one of: json, html, csv"))
+		writeJSON(w, http.StatusBadRequest, errorBody("format must be one of: json, html, csv, pdf, docx"))
 	}
 }
 

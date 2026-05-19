@@ -19,7 +19,7 @@ See `docs/ARCHITECTURE.md` for the design analysis and migration plan.
   server restart keeps your data.
 - Server-Sent Events stream at `/api/v1/runs/{id}/events` for live run
   progress.
-- HTML / CSV / JSON report renderer.
+- HTML / CSV / JSON / PDF / DOCX report renderer.
 - SQLite backend with the same on-disk schema Lantern's Python service
   uses, so the two can share a database during migration.
 
