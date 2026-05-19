@@ -24,6 +24,7 @@ type Store struct {
 	Projects *ProjectRepo
 	Scopes   *ScopeRepo
 	Runs     *RunRepo
+	Audit    *AuditRepo
 }
 
 // New constructs an empty Store with all sub-repositories initialized.
@@ -32,6 +33,7 @@ func New() *Store {
 		Projects: NewProjectRepo(),
 		Scopes:   NewScopeRepo(),
 		Runs:     NewRunRepo(),
+		Audit:    NewAuditRepo(),
 	}
 }
 

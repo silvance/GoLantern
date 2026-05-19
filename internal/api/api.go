@@ -15,9 +15,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
@@ -31,16 +35,23 @@ type Server struct {
 	Projects project.Repository
 	Scopes   scope.Repository
 	Runs     run.Repository
+	Audit    audit.Repository
 	Logger   *slog.Logger
 }
 
 // New constructs a Server with sensible defaults. Logger defaults to
 // slog.Default when nil.
-func New(projects project.Repository, scopes scope.Repository, runs run.Repository) *Server {
+func New(
+	projects project.Repository,
+	scopes scope.Repository,
+	runs run.Repository,
+	audits audit.Repository,
+) *Server {
 	return &Server{
 		Projects: projects,
 		Scopes:   scopes,
 		Runs:     runs,
+		Audit:    audits,
 		Logger:   slog.Default(),
 	}
 }
@@ -53,7 +64,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/projects", s.handleListProjects)
 	mux.HandleFunc("GET /api/v1/projects/{id}", s.handleGetProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}/scope-rules", s.handleListScopeRules)
+	mux.HandleFunc("POST /api/v1/projects/{id}/scope-rules", s.handleCreateScopeRule)
+	mux.HandleFunc("DELETE /api/v1/projects/{id}/scope-rules/{ruleID}", s.handleDeleteScopeRule)
 	mux.HandleFunc("GET /api/v1/projects/{id}/scope/test", s.handleScopeTest)
+	mux.HandleFunc("GET /api/v1/projects/{id}/audit-logs", s.handleListAuditLogs)
 	mux.HandleFunc("GET /api/v1/projects/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
@@ -107,6 +121,172 @@ func (s *Server) handleListScopeRules(w http.ResponseWriter, r *http.Request) {
 			Pattern:   sr.Rule.Pattern,
 			Kind:      string(sr.Rule.Kind),
 			Note:      sr.Note,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleCreateScopeRule implements POST /api/v1/projects/{id}/scope-rules.
+//
+// Body: {pattern: string (required), kind?: string, note?: string}.
+// When kind is omitted, the project's mode preset chooses one and the
+// audit record's detail.kind_source flips from "explicit" to
+// "mode_preset" — preserves the Python audit invariant.
+//
+// 201 + JSON body on success, 400 on bad input, 409 on duplicate
+// pattern within the project, 404 if the project is gone.
+func (s *Server) handleCreateScopeRule(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	var req createScopeRuleRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	req.Pattern = strings.TrimSpace(req.Pattern)
+	if req.Pattern == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("pattern is required"))
+		return
+	}
+
+	kind := scope.RuleKind(strings.ToLower(strings.TrimSpace(req.Kind)))
+	kindSource := "explicit"
+	if req.Kind == "" {
+		kind = workflow.PresetFor(p.Mode).SuggestedScopeKind
+		kindSource = "mode_preset"
+	}
+	if !kind.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid kind %q", req.Kind)))
+		return
+	}
+
+	sr := &scope.StoredRule{
+		ProjectID: projectID,
+		Rule:      scope.Rule{Pattern: req.Pattern, Kind: kind},
+		Note:      strings.TrimSpace(req.Note),
+	}
+	if err := s.Scopes.Add(r.Context(), sr); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	// Audit-log the action. Failures here are logged but do not roll
+	// back the create — losing the audit row is worse than losing the
+	// rule, but a partial write is even worse, and we have no
+	// cross-repo transaction yet. Phase 5 will introduce a Tx scope
+	// around handlers that need atomicity.
+	auditEntry := &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionScopeRuleCreated,
+		Target:              sr.Rule.Pattern,
+		Detail: map[string]any{
+			"kind":        string(sr.Rule.Kind),
+			"note":        sr.Note,
+			"kind_source": kindSource,
+		},
+	}
+	if err := s.Audit.Record(r.Context(), auditEntry); err != nil {
+		s.Logger.WarnContext(r.Context(), "audit record failed",
+			slog.String("action", auditEntry.Action),
+			slog.String("rule_id", sr.ID),
+			slog.Any("err", err))
+	}
+
+	writeJSON(w, http.StatusCreated, scopeRuleDTO{
+		ID:        sr.ID,
+		ProjectID: sr.ProjectID,
+		Pattern:   sr.Rule.Pattern,
+		Kind:      string(sr.Rule.Kind),
+		Note:      sr.Note,
+	})
+}
+
+// handleDeleteScopeRule implements DELETE /api/v1/projects/{id}/scope-rules/{ruleID}.
+//
+// 204 No Content on success, 404 if the project or rule doesn't exist
+// or if the rule belongs to a different project. The cross-project
+// guard is important: without it a caller who guesses a rule ID could
+// delete rules from projects they shouldn't see.
+func (s *Server) handleDeleteScopeRule(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	ruleID := r.PathValue("ruleID")
+
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	// Look up the rule via the project's rule list so we both
+	// authenticate the cross-project boundary and capture the rule
+	// fields for the audit row before deleting it.
+	rules, err := s.Scopes.ListByProject(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	var target *scope.StoredRule
+	for i := range rules {
+		if rules[i].ID == ruleID {
+			target = &rules[i]
+			break
+		}
+	}
+	if target == nil {
+		writeJSON(w, http.StatusNotFound, errorBody("scope rule not found"))
+		return
+	}
+
+	if err := s.Scopes.Delete(r.Context(), ruleID); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	auditEntry := &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionScopeRuleDeleted,
+		Target:              target.Rule.Pattern,
+		Detail:              map[string]any{"kind": string(target.Rule.Kind)},
+	}
+	if err := s.Audit.Record(r.Context(), auditEntry); err != nil {
+		s.Logger.WarnContext(r.Context(), "audit record failed",
+			slog.String("action", auditEntry.Action),
+			slog.String("rule_id", ruleID),
+			slog.Any("err", err))
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	pid := r.PathValue("id")
+	if _, err := s.Projects.Get(r.Context(), pid); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	rows, err := s.Audit.ListByProject(r.Context(), pid)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	out := make([]auditLogDTO, len(rows))
+	for i, e := range rows {
+		out[i] = auditLogDTO{
+			ID:                  e.ID,
+			ProjectID:           e.ProjectID,
+			ProjectNameSnapshot: e.ProjectNameSnapshot,
+			Actor:               e.Actor,
+			Action:              e.Action,
+			Target:              e.Target,
+			Detail:              e.Detail,
+			CreatedAt:           e.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -284,4 +464,47 @@ type toolExecDTO struct {
 	EvidenceEmitted int    `json:"evidence_emitted"`
 	FindingsEmitted int    `json:"findings_emitted"`
 	ErrorSummary    string `json:"error_summary,omitempty"`
+}
+
+type createScopeRuleRequest struct {
+	Pattern string `json:"pattern"`
+	Kind    string `json:"kind,omitempty"`
+	Note    string `json:"note,omitempty"`
+}
+
+type auditLogDTO struct {
+	ID                  string         `json:"id"`
+	ProjectID           string         `json:"project_id,omitempty"`
+	ProjectNameSnapshot string         `json:"project_name_snapshot,omitempty"`
+	Actor               string         `json:"actor"`
+	Action              string         `json:"action"`
+	Target              string         `json:"target,omitempty"`
+	Detail              map[string]any `json:"detail"`
+	CreatedAt           string         `json:"created_at"`
+}
+
+// decodeJSONBody reads at most maxBodyBytes from r.Body and decodes it
+// into dst. Rejects unknown fields so a typo in the SPA surfaces as
+// 400 rather than silently being ignored.
+const maxBodyBytes = 1 << 20 // 1 MiB; way more than any scope-rule body
+
+func decodeJSONBody(r *http.Request, dst any) error {
+	if r.Body == nil {
+		return fmt.Errorf("empty request body")
+	}
+	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("empty request body")
+		}
+		return err
+	}
+	// Refuse trailing garbage; a body like `{"a":1}{"b":2}` is almost
+	// always a client bug rather than legitimate input.
+	if dec.More() {
+		return fmt.Errorf("unexpected trailing data in request body")
+	}
+	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/silvance/golantern/internal/api"
+	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
@@ -69,6 +70,7 @@ func cmdServe(args []string) error {
 	var projects project.Repository
 	var scopes scope.Repository
 	var runs run.Repository
+	var audits audit.Repository
 
 	if *dbPath == "" {
 		st := memory.New()
@@ -78,7 +80,7 @@ func cmdServe(args []string) error {
 			}
 			logger.Info("seeded demo project (in-memory store)")
 		}
-		projects, scopes, runs = st.Projects, st.Scopes, st.Runs
+		projects, scopes, runs, audits = st.Projects, st.Scopes, st.Runs, st.Audit
 	} else {
 		db, err := sqlite.Open(*dbPath)
 		if err != nil {
@@ -95,10 +97,10 @@ func cmdServe(args []string) error {
 			}
 			logger.Info("seeded demo project", slog.String("db", *dbPath))
 		}
-		projects, scopes, runs = st.Projects, st.Scopes, st.Runs
+		projects, scopes, runs, audits = st.Projects, st.Scopes, st.Runs, st.Audit
 	}
 
-	srv := api.New(projects, scopes, runs)
+	srv := api.New(projects, scopes, runs, audits)
 	srv.Logger = logger
 
 	httpSrv := &http.Server{

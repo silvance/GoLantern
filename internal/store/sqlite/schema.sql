@@ -77,3 +77,21 @@ CREATE TABLE IF NOT EXISTS tool_executions (
 );
 CREATE INDEX IF NOT EXISTS ix_tool_executions_run ON tool_executions(run_id);
 CREATE INDEX IF NOT EXISTS ix_tool_executions_status ON tool_executions(status);
+
+-- audit_logs survives project deletion: project_id goes NULL via the
+-- ON DELETE SET NULL FK so the "who authorized what" trail can't be
+-- wiped by deleting the project that an action targeted. The
+-- project_name_snapshot column captures the project's name at write
+-- time so the row stays human-readable after the FK clears.
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                    VARCHAR(32) PRIMARY KEY,
+    project_id            VARCHAR(32) REFERENCES projects(id) ON DELETE SET NULL,
+    project_name_snapshot VARCHAR(256),
+    actor                 VARCHAR(128) NOT NULL DEFAULT 'system',
+    action                VARCHAR(128) NOT NULL,
+    target                VARCHAR(512),
+    detail                TEXT NOT NULL DEFAULT '{}',  -- JSON
+    created_at            DATETIME NOT NULL,
+    updated_at            DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_audit_logs_project ON audit_logs(project_id);

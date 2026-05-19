@@ -67,22 +67,24 @@ func toDBEnum(v string) string { return strings.ToUpper(v) }
 // output (some columns are nullable).
 func fromDBEnum(s string) string { return strings.ToLower(s) }
 
-// Store bundles the three repositories sharing one *sql.DB. Useful
+// Store bundles the four repositories sharing one *sql.DB. Useful
 // when wiring a server or test from a single connection.
 type Store struct {
 	DB       *sql.DB
 	Projects *ProjectRepo
 	Scopes   *ScopeRepo
 	Runs     *RunRepo
+	Audit    *AuditRepo
 }
 
-// NewStore constructs all three repositories around db. The caller
-// remains responsible for db.Close().
+// NewStore constructs all repositories around db. The caller remains
+// responsible for db.Close().
 func NewStore(db *sql.DB) *Store {
 	return &Store{
 		DB:       db,
 		Projects: NewProjectRepo(db),
 		Scopes:   NewScopeRepo(db),
 		Runs:     NewRunRepo(db),
+		Audit:    NewAuditRepo(db),
 	}
 }

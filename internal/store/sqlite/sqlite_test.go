@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
@@ -36,6 +37,7 @@ var (
 	_ project.Repository = (*ProjectRepo)(nil)
 	_ scope.Repository   = (*ScopeRepo)(nil)
 	_ run.Repository     = (*RunRepo)(nil)
+	_ audit.Repository   = (*AuditRepo)(nil)
 )
 
 func TestMigrateIsIdempotent(t *testing.T) {
@@ -310,6 +312,105 @@ func TestForeignKeyCascade(t *testing.T) {
 	_ = st.DB.QueryRowContext(ctx(), `SELECT count(*) FROM tool_executions`).Scan(&n)
 	if n != 0 {
 		t.Fatalf("tool_executions cascade failed: %d rows remain", n)
+	}
+}
+
+// ----- audit -----------------------------------------------------------
+
+func TestAuditRecordAndList(t *testing.T) {
+	st := newTestStore(t)
+	p := &project.Project{Name: "X", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(ctx(), p)
+
+	for i, action := range []string{
+		audit.ActionScopeRuleCreated,
+		audit.ActionScopeRuleDeleted,
+	} {
+		if err := st.Audit.Record(ctx(), &audit.LogEntry{
+			ProjectID:           p.ID,
+			ProjectNameSnapshot: p.Name,
+			Action:              action,
+			Target:              "host.example.com",
+			Detail:              map[string]any{"kind": "passive", "i": float64(i)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond) // distinct created_at for ordering
+	}
+
+	rows, err := st.Audit.ListByProject(ctx(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows=%d, want 2", len(rows))
+	}
+	// Newest first.
+	if rows[0].Action != audit.ActionScopeRuleDeleted {
+		t.Fatalf("order: %+v", rows)
+	}
+	if rows[0].Detail["kind"] != "passive" {
+		t.Fatalf("detail JSON did not round-trip: %+v", rows[0].Detail)
+	}
+}
+
+func TestAuditDefaultsActorAndCreatedAt(t *testing.T) {
+	st := newTestStore(t)
+	p := &project.Project{Name: "X", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(ctx(), p)
+	e := &audit.LogEntry{
+		ProjectID: p.ID, Action: "x", Target: "y",
+	}
+	if err := st.Audit.Record(ctx(), e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Actor != "system" {
+		t.Fatalf("Actor default = %q, want 'system'", e.Actor)
+	}
+	if e.CreatedAt.IsZero() {
+		t.Fatal("CreatedAt should be stamped")
+	}
+}
+
+func TestAuditFKSetNullOnProjectDelete(t *testing.T) {
+	// The Python invariant: audit rows survive project deletion via
+	// ON DELETE SET NULL. The trail of "who authorized what" must
+	// remain reviewable even after the project is gone.
+	st := newTestStore(t)
+	p := &project.Project{Name: "Doomed", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(ctx(), p)
+	_ = st.Audit.Record(ctx(), &audit.LogEntry{
+		ProjectID:           p.ID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionScopeRuleCreated,
+		Target:              "host.example.com",
+	})
+
+	if err := st.Projects.Delete(ctx(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct DB read — the row must still exist with project_id NULL.
+	var n int
+	var dbProjID sql.NullString
+	var snapshot sql.NullString
+	if err := st.DB.QueryRowContext(ctx(),
+		`SELECT count(*) FROM audit_logs WHERE action = ?`,
+		audit.ActionScopeRuleCreated,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("audit row should survive project deletion; have %d rows", n)
+	}
+	_ = st.DB.QueryRowContext(ctx(),
+		`SELECT project_id, project_name_snapshot FROM audit_logs LIMIT 1`,
+	).Scan(&dbProjID, &snapshot)
+	if dbProjID.Valid {
+		t.Fatalf("project_id should be NULL after parent deletion, got %q", dbProjID.String)
+	}
+	if snapshot.String != "Doomed" {
+		t.Fatalf("project_name_snapshot lost: %q", snapshot.String)
 	}
 }
 
