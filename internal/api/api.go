@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/assistant"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
@@ -49,6 +50,11 @@ type Server struct {
 	// either is nil, GET /report returns 501.
 	Entities entity.Repository
 	Findings finding.Repository
+	// Artifacts + ArtifactStore are optional. When both are wired,
+	// GET /api/v1/artifacts/{id} streams the bytes; when either is
+	// nil, that endpoint returns 501.
+	Artifacts     artifact.Repository
+	ArtifactStore artifact.Store
 	// Bus is optional. When set, GET /runs/{id}/events streams
 	// Server-Sent Events; nil makes that endpoint return 501.
 	Bus *events.Bus
@@ -121,7 +127,104 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
 	mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	mux.HandleFunc("POST /api/v1/projects/{id}/assistant/ask", s.handleAssistantAsk)
+	mux.HandleFunc("GET /api/v1/projects/{id}/artifacts", s.handleListArtifacts)
+	mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
 	return mux
+}
+
+// handleListArtifacts returns metadata rows for every artifact a project
+// owns, newest first. Bytes are fetched separately via
+// GET /api/v1/artifacts/{id}.
+func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
+	if s.Artifacts == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody("artifact storage not configured"))
+		return
+	}
+	projectID := r.PathValue("id")
+	if _, err := s.Projects.Get(r.Context(), projectID); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	rows, err := s.Artifacts.ListByProject(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	out := make([]artifactDTO, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, toArtifactDTO(a))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetArtifact streams the raw bytes for an artifact. The
+// Content-Type comes from the stored row; Content-Disposition is
+// "attachment" so a browser hitting the endpoint directly saves the
+// file rather than trying to render it (useful for raw HTML captures
+// from nuclei etc., which we don't want rendered in the operator's
+// browser context).
+func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
+	if s.Artifacts == nil || s.ArtifactStore == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody("artifact storage not configured"))
+		return
+	}
+	artifactID := r.PathValue("id")
+	a, err := s.Artifacts.Get(r.Context(), artifactID)
+	if err != nil {
+		if errors.Is(err, artifact.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, errorBody("not found"))
+			return
+		}
+		s.writeError(w, r, err)
+		return
+	}
+	body, err := s.ArtifactStore.Get(r.Context(), a.StorageURI)
+	if err != nil {
+		if errors.Is(err, artifact.ErrNotFound) {
+			// Row says it exists but bytes are gone. Treat as 410 so
+			// callers can distinguish from "never existed".
+			writeJSON(w, http.StatusGone, errorBody("artifact bytes are gone"))
+			return
+		}
+		s.writeError(w, r, err)
+		return
+	}
+	contentType := a.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	if a.Filename != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", a.Filename))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// artifactDTO is the wire shape for artifact rows. StorageURI is
+// deliberately omitted — clients should fetch via the artifact id
+// endpoint, not poke at filesystem paths.
+type artifactDTO struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"content_type"`
+	SizeBytes   int       `json:"size_bytes"`
+	SHA256      string    `json:"sha256"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func toArtifactDTO(a *artifact.Artifact) artifactDTO {
+	return artifactDTO{
+		ID:          a.ID,
+		ProjectID:   a.ProjectID,
+		Filename:    a.Filename,
+		ContentType: a.ContentType,
+		SizeBytes:   a.SizeBytes,
+		SHA256:      a.SHA256,
+		CreatedAt:   a.CreatedAt,
+	}
 }
 
 // handleAssistantAsk implements POST /api/v1/projects/{id}/assistant/ask.

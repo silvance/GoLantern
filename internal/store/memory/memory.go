@@ -11,7 +11,9 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/id"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
@@ -21,23 +23,25 @@ import (
 // Store bundles in-memory implementations of every repository, so a
 // test or the early-stage server can wire all of them at once.
 type Store struct {
-	Projects *ProjectRepo
-	Scopes   *ScopeRepo
-	Runs     *RunRepo
-	Audit    *AuditRepo
-	Entities *EntityRepo
-	Findings *FindingRepo
+	Projects  *ProjectRepo
+	Scopes    *ScopeRepo
+	Runs      *RunRepo
+	Audit     *AuditRepo
+	Entities  *EntityRepo
+	Findings  *FindingRepo
+	Artifacts *ArtifactRepo
 }
 
 // New constructs an empty Store with all sub-repositories initialized.
 func New() *Store {
 	return &Store{
-		Projects: NewProjectRepo(),
-		Scopes:   NewScopeRepo(),
-		Runs:     NewRunRepo(),
+		Projects:  NewProjectRepo(),
+		Scopes:    NewScopeRepo(),
+		Runs:      NewRunRepo(),
 		Audit:    NewAuditRepo(),
-		Entities: NewEntityRepo(),
-		Findings: NewFindingRepo(),
+		Entities:  NewEntityRepo(),
+		Findings:  NewFindingRepo(),
+		Artifacts: NewArtifactRepo(),
 	}
 }
 
@@ -317,11 +321,68 @@ func (r *RunRepo) ListToolExecutions(_ context.Context, runID string) ([]*run.To
 	return out, nil
 }
 
+// ----- Artifacts -------------------------------------------------------
+
+type ArtifactRepo struct {
+	mu          sync.RWMutex
+	byID        map[string]*artifact.Artifact
+	insertOrder map[string][]string // projectID -> artifactIDs (oldest first)
+}
+
+func NewArtifactRepo() *ArtifactRepo {
+	return &ArtifactRepo{
+		byID:        make(map[string]*artifact.Artifact),
+		insertOrder: make(map[string][]string),
+	}
+}
+
+func (r *ArtifactRepo) Create(_ context.Context, a *artifact.Artifact) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a.ID == "" {
+		a.ID = id.New()
+	}
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Now().UTC()
+	}
+	clone := *a
+	r.byID[a.ID] = &clone
+	r.insertOrder[a.ProjectID] = append(r.insertOrder[a.ProjectID], a.ID)
+	return nil
+}
+
+func (r *ArtifactRepo) Get(_ context.Context, artifactID string) (*artifact.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	a, ok := r.byID[artifactID]
+	if !ok {
+		return nil, artifact.ErrNotFound
+	}
+	clone := *a
+	return &clone, nil
+}
+
+func (r *ArtifactRepo) ListByProject(_ context.Context, projectID string) ([]*artifact.Artifact, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := r.insertOrder[projectID]
+	out := make([]*artifact.Artifact, 0, len(ids))
+	// Newest-first to match SQLite's ORDER BY created_at DESC.
+	for i := len(ids) - 1; i >= 0; i-- {
+		if a, ok := r.byID[ids[i]]; ok {
+			clone := *a
+			out = append(out, &clone)
+		}
+	}
+	return out, nil
+}
+
 // Compile-time assertions that the in-memory types implement the domain
 // repository interfaces. If a method signature drifts on either side
 // this fails to build, which is precisely what we want.
 var (
-	_ project.Repository = (*ProjectRepo)(nil)
-	_ scope.Repository   = (*ScopeRepo)(nil)
-	_ run.Repository     = (*RunRepo)(nil)
+	_ project.Repository  = (*ProjectRepo)(nil)
+	_ scope.Repository    = (*ScopeRepo)(nil)
+	_ run.Repository      = (*RunRepo)(nil)
+	_ artifact.Repository = (*ArtifactRepo)(nil)
 )

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/silvance/golantern/internal/api"
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/assistant"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
@@ -33,6 +34,7 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/ffuf"
 	"github.com/silvance/golantern/internal/scan/collectors/fixture"
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
+	"github.com/silvance/golantern/internal/scan/collectors/gowitness"
 	"github.com/silvance/golantern/internal/scan/collectors/hibp"
 	"github.com/silvance/golantern/internal/scan/collectors/historicalurls"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
@@ -87,12 +89,13 @@ Run 'golantern serve --help' for flags.`)
 // the SQLite and in-memory branches return the same shape and the rest
 // of cmdServe is store-agnostic.
 type repos struct {
-	Projects project.Repository
-	Scopes   scope.Repository
-	Runs     run.Repository
-	Audit    audit.Repository
-	Entities entity.Repository
-	Findings finding.Repository
+	Projects  project.Repository
+	Scopes    scope.Repository
+	Runs      run.Repository
+	Audit     audit.Repository
+	Entities  entity.Repository
+	Findings  finding.Repository
+	Artifacts artifact.Repository
 }
 
 func cmdServe(args []string) error {
@@ -101,6 +104,7 @@ func cmdServe(args []string) error {
 	dbPath := fs.String("db", "", "SQLite database path; empty uses an in-memory store")
 	demo := fs.Bool("seed-demo", false, "preload a demo project before serving")
 	workers := fs.Int("workers", 2, "number of scan-engine workers")
+	artifactsDir := fs.String("artifacts-dir", "", "directory for artifact bytes; empty disables artifact storage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -124,6 +128,7 @@ func cmdServe(args []string) error {
 	reg.Register(exiftool.Name, exiftool.New)
 	reg.Register(ffuf.Name, ffuf.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
+	reg.Register(gowitness.Name, gowitness.New)
 	reg.Register(hibp.Name, hibp.New)
 	reg.Register(historicalurls.Name, historicalurls.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
@@ -142,12 +147,29 @@ func cmdServe(args []string) error {
 	// closes over engine.ExecuteRun so the queue package keeps no
 	// dependency on engine.
 	bus := events.NewBus(logger)
+
+	// Optional artifact bytes store. When --artifacts-dir is set, we
+	// wire a filesystem store and pass it (plus the repository) to the
+	// scan deps so collectors like gowitness can persist screenshots.
+	// When the flag is empty, Artifacts + ArtifactStore stay nil and
+	// the runner reports ErrStoreArtifactNotConfigured to any
+	// collector that tries to use them.
+	var artifactStore artifact.Store
+	var artifactsRepo artifact.Repository
+	if *artifactsDir != "" {
+		artifactStore = artifact.NewFilesystemStore(*artifactsDir)
+		artifactsRepo = r.Artifacts
+		logger.Info("artifact storage enabled", slog.String("dir", *artifactsDir))
+	}
+
 	executeRunDeps := engine.ExecuteRunDeps{
 		Runs: r.Runs,
 		ScanDeps: scan.Deps{
-			Runs:     r.Runs,
-			Entities: r.Entities,
-			Findings: r.Findings,
+			Runs:          r.Runs,
+			Entities:      r.Entities,
+			Findings:      r.Findings,
+			Artifacts:     artifactsRepo,
+			ArtifactStore: artifactStore,
 			// Scope is set per-run by LoadPolicyFn.
 		},
 		Registry: reg,
@@ -203,6 +225,8 @@ func cmdServe(args []string) error {
 	srv.Logger = logger
 	srv.Entities = r.Entities
 	srv.Findings = r.Findings
+	srv.Artifacts = artifactsRepo
+	srv.ArtifactStore = artifactStore
 	srv.Bus = bus
 	srv.Assistant = assistantProvider
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
@@ -264,7 +288,7 @@ func openRepos(dbPath string, logger *slog.Logger, seedDemo bool) (*repos, func(
 		}
 		return &repos{
 			Projects: st.Projects, Scopes: st.Scopes, Runs: st.Runs, Audit: st.Audit,
-			Entities: st.Entities, Findings: st.Findings,
+			Entities: st.Entities, Findings: st.Findings, Artifacts: st.Artifacts,
 		}, func() {}, nil
 	}
 
@@ -286,7 +310,7 @@ func openRepos(dbPath string, logger *slog.Logger, seedDemo bool) (*repos, func(
 	}
 	return &repos{
 			Projects: st.Projects, Scopes: st.Scopes, Runs: st.Runs, Audit: st.Audit,
-			Entities: st.Entities, Findings: st.Findings,
+			Entities: st.Entities, Findings: st.Findings, Artifacts: st.Artifacts,
 		}, func() {
 			db.Close()
 		}, nil

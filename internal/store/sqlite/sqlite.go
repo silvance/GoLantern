@@ -70,25 +70,27 @@ func fromDBEnum(s string) string { return strings.ToLower(s) }
 // Store bundles every repository sharing one *sql.DB. Useful when
 // wiring a server or test from a single connection.
 type Store struct {
-	DB       *sql.DB
-	Projects *ProjectRepo
-	Scopes   *ScopeRepo
-	Runs     *RunRepo
-	Audit    *AuditRepo
-	Entities *EntityRepo
-	Findings *FindingRepo
+	DB        *sql.DB
+	Projects  *ProjectRepo
+	Scopes    *ScopeRepo
+	Runs      *RunRepo
+	Audit     *AuditRepo
+	Entities  *EntityRepo
+	Findings  *FindingRepo
+	Artifacts *ArtifactRepo
 }
 
 // NewStore constructs all repositories around db. The caller remains
 // responsible for db.Close().
 func NewStore(db *sql.DB) *Store {
 	return &Store{
-		DB:       db,
-		Projects: NewProjectRepo(db),
-		Scopes:   NewScopeRepo(db),
-		Runs:     NewRunRepo(db),
-		Audit:    NewAuditRepo(db),
-		Entities: NewEntityRepo(db),
-		Findings: NewFindingRepo(db),
+		DB:        db,
+		Projects:  NewProjectRepo(db),
+		Scopes:    NewScopeRepo(db),
+		Runs:      NewRunRepo(db),
+		Audit:     NewAuditRepo(db),
+		Entities:  NewEntityRepo(db),
+		Findings:  NewFindingRepo(db),
+		Artifacts: NewArtifactRepo(db),
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/entity"
 	"github.com/silvance/golantern/internal/fact"
 	"github.com/silvance/golantern/internal/finding"
@@ -116,10 +117,12 @@ type Context interface {
 	StoreArtifact(content []byte, filename, contentType string) (uri string, err error)
 }
 
-// ErrStoreArtifactNotImplemented is returned by Context.StoreArtifact
-// until the artifact subsystem lands. The runner stubs the method so
-// collectors can be authored against the full interface today.
-var ErrStoreArtifactNotImplemented = errors.New("scan: artifact storage not yet implemented")
+// ErrStoreArtifactNotConfigured is returned by Context.StoreArtifact
+// when the runner was constructed without an artifact repository and
+// store. Collectors that need artifact persistence should treat this
+// as a configuration error and surface a clear message to the operator
+// rather than silently producing evidence with empty artifact URIs.
+var ErrStoreArtifactNotConfigured = errors.New("scan: artifact storage not configured on this runner")
 
 // Registry maps collector names to factories.
 //
@@ -190,6 +193,14 @@ type Deps struct {
 	Entities entity.Repository
 	Findings finding.Repository
 	Scope    *scope.Policy
+
+	// Artifacts + ArtifactStore are optional: when both are wired,
+	// Context.StoreArtifact persists bytes; when either is nil, the
+	// method returns ErrStoreArtifactNotConfigured. Both must be set
+	// together — a half-configured pair makes the runner reject
+	// construction.
+	Artifacts     artifact.Repository
+	ArtifactStore artifact.Store
 }
 
 // validate reports the first missing required dep. We call this at
@@ -205,6 +216,8 @@ func (d Deps) validate() error {
 		return errors.New("scan: Deps.Findings is required")
 	case d.Scope == nil:
 		return errors.New("scan: Deps.Scope is required")
+	case (d.Artifacts == nil) != (d.ArtifactStore == nil):
+		return errors.New("scan: Deps.Artifacts and Deps.ArtifactStore must be set together")
 	}
 	return nil
 }

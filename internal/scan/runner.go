@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
 
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/entity"
 	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/fact"
 	"github.com/silvance/golantern/internal/finding"
+	"github.com/silvance/golantern/internal/id"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
 )
@@ -324,8 +327,35 @@ func (p *persistingContext) ListEntityValues(kind entity.Kind) ([]string, error)
 	return p.runner.deps.Entities.ListValuesByKind(p.baseCtx, p.projectID, kind)
 }
 
-func (p *persistingContext) StoreArtifact(_ []byte, _, _ string) (string, error) {
-	return "", ErrStoreArtifactNotImplemented
+func (p *persistingContext) StoreArtifact(content []byte, filename, contentType string) (string, error) {
+	if p.runner.deps.Artifacts == nil || p.runner.deps.ArtifactStore == nil {
+		return "", ErrStoreArtifactNotConfigured
+	}
+	if contentType == "" {
+		contentType = http.DetectContentType(content)
+	}
+	artifactID := id.New()
+	uri, err := p.runner.deps.ArtifactStore.Put(p.baseCtx, p.projectID, artifactID, content)
+	if err != nil {
+		return "", fmt.Errorf("store artifact bytes: %w", err)
+	}
+	row := &artifact.Artifact{
+		ID:          artifactID,
+		ProjectID:   p.projectID,
+		Filename:    filename,
+		ContentType: contentType,
+		SizeBytes:   len(content),
+		SHA256:      artifact.SHA256(content),
+		StorageURI:  uri,
+	}
+	if err := p.runner.deps.Artifacts.Create(p.baseCtx, row); err != nil {
+		// Best-effort cleanup so we don't leave orphan bytes when the
+		// row insert fails. Ignore delete errors — the original error
+		// is what the caller needs to see.
+		_ = p.runner.deps.ArtifactStore.Delete(p.baseCtx, uri)
+		return "", fmt.Errorf("store artifact row: %w", err)
+	}
+	return uri, nil
 }
 
 func (p *persistingContext) EmitEntity(f fact.EntityFact) (string, error) {

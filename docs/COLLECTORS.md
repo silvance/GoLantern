@@ -7,7 +7,7 @@ covers the LCVA workflow phases the Python service implemented:
 |---|---|
 | OSINT | `theharvester`, `sherlock`, `fixture` |
 | Asset Discovery | `crtsh`, `subfinder`, `historical_urls`, `github_repos` |
-| Validation | `dnsx`, `httpx_probe`, `nmap`, `ffuf`, `smbmap` |
+| Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `ffuf`, `smbmap` |
 | Exposure | `nuclei`, `nikto`, `testssl`, `email_security` |
 | Enrichment | `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
 
@@ -50,7 +50,6 @@ clean Go equivalent.
 
 | Python collector | Why skipped |
 |---|---|
-| `gowitness` | Screenshots HTTP endpoints. Requires the `artifact` subsystem to persist PNGs; `scan.Context.StoreArtifact` currently returns `ErrStoreArtifactNotImplemented`. Ports when artifacts land. |
 | `msf_aux`, `msf_check`, `_msf.py` | Wraps Metasploit's RPC API via `pymetasploit3`. There's no clean Go equivalent of `pymetasploit3` — the Metasploit RPC client is a non-trivial dependency that would justify its own package. We treat this as a separate project. |
 
 ### Skipped — superseded

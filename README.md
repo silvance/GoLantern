@@ -131,6 +131,7 @@ existing `lantern.db` and Go will read it.
 | `--db`         | (empty)              | SQLite path. Empty uses an in-memory store. |
 | `--workers`    | `2`                  | Number of scan-engine workers running in parallel. |
 | `--seed-demo`  | `false`              | Pre-create a demo project + scope rules + a completed OSINT run. |
+| `--artifacts-dir` | (empty)           | Filesystem directory for artifact bytes (screenshots, raw response captures). Empty disables artifact storage — collectors that need it (`gowitness`) will fail with a clear "not configured" message. |
 
 ### A quick demo
 

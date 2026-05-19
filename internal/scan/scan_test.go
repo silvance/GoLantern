@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/silvance/golantern/internal/artifact"
 	"github.com/silvance/golantern/internal/entity"
 	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/project"
@@ -319,14 +320,74 @@ func TestNewRunnerRejectsMissingDeps(t *testing.T) {
 	}
 }
 
-func TestStoreArtifactStubbed(t *testing.T) {
+// TestStoreArtifactUnconfigured verifies the runner errors cleanly
+// (without panic, without persisting an empty URI) when a collector
+// calls StoreArtifact but no artifact backend is wired.
+func TestStoreArtifactUnconfigured(t *testing.T) {
 	_, runner, p, ru := fixtureSetup(t, project.ModeAssessment,
 		[]scope.Rule{{Pattern: "*.example.com", Kind: scope.KindLightActive}},
 		scope.KindPassive, scope.KindPassive)
 	tx, _ := runner.Execute(context.Background(), p.ID, ru.ID,
 		&artifactCollector{}, nil)
 	if tx.Status != run.ToolStatusFailed {
-		t.Fatalf("status=%s, want failed (artifact not implemented)", tx.Status)
+		t.Fatalf("status=%s, want failed (artifact backend missing)", tx.Status)
+	}
+	if !strings.Contains(tx.ErrorSummary, "artifact storage not configured") {
+		t.Fatalf("error summary missing the not-configured hint: %q", tx.ErrorSummary)
+	}
+}
+
+// TestStoreArtifactWired wires the runner with a filesystem store + a
+// memory repository and confirms StoreArtifact persists bytes, returns
+// a parseable URI, and lets the bytes round-trip through the store.
+func TestStoreArtifactWired(t *testing.T) {
+	st := memory.New()
+	ctx := context.Background()
+	p := &project.Project{Name: "PArt", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	if err := st.Projects.Save(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	ru := &run.Run{ProjectID: p.ID, Phase: workflow.PhaseOSINT, Status: run.StatusRunning}
+	if err := st.Runs.Save(ctx, ru); err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := scope.Compile(p.ID, p.DefaultScope, nil)
+
+	dir := t.TempDir()
+	store := artifact.NewFilesystemStore(dir)
+	runner, err := scan.NewRunner(scan.Deps{
+		Runs:          st.Runs,
+		Entities:      st.Entities,
+		Findings:      st.Findings,
+		Scope:         pol,
+		Artifacts:     st.Artifacts,
+		ArtifactStore: store,
+	}, nil, st.Audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := runner.Execute(ctx, p.ID, ru.ID, &artifactCollector{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Status != run.ToolStatusCompleted {
+		t.Fatalf("status=%s err=%q", tx.Status, tx.ErrorSummary)
+	}
+	rows, err := st.Artifacts.ListByProject(ctx, p.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("expected 1 artifact row, got %d err=%v", len(rows), err)
+	}
+	a := rows[0]
+	if a.Filename != "x.bin" || a.ContentType != "application/octet-stream" {
+		t.Fatalf("artifact metadata wrong: %+v", a)
+	}
+	if a.SizeBytes != 5 || a.SHA256 == "" {
+		t.Fatalf("artifact size/sha wrong: %+v", a)
+	}
+	got, err := store.Get(ctx, a.StorageURI)
+	if err != nil || string(got) != "hello" {
+		t.Fatalf("round-trip bytes wrong: %q err=%v", got, err)
 	}
 }
 

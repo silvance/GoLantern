@@ -191,3 +191,22 @@ CREATE TABLE IF NOT EXISTS evidence (
 CREATE INDEX IF NOT EXISTS ix_evidence_entity ON evidence(entity_id);
 CREATE INDEX IF NOT EXISTS ix_evidence_finding ON evidence(finding_id);
 CREATE INDEX IF NOT EXISTS ix_evidence_project ON evidence(project_id);
+
+-- Artifacts: metadata row for a binary blob (screenshot, HTML body
+-- capture, raw tool output dump, ...). The bytes themselves live in
+-- whatever artifact.Store backs the runner; storage_uri points at them
+-- and survives a Store swap because the URI scheme is "lantern://".
+-- sha256 lets analysts dedupe / verify integrity. content_type is the
+-- caller-asserted MIME type; we don't sniff.
+CREATE TABLE IF NOT EXISTS artifacts (
+    id           VARCHAR(32) PRIMARY KEY,
+    project_id   VARCHAR(32) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    filename     VARCHAR(512) NOT NULL,
+    content_type VARCHAR(128) NOT NULL,
+    size_bytes   INTEGER NOT NULL,
+    sha256       VARCHAR(64) NOT NULL,
+    storage_uri  VARCHAR(1024) NOT NULL,
+    created_at   DATETIME NOT NULL,
+    updated_at   DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_artifacts_project ON artifacts(project_id);
