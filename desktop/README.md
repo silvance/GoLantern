@@ -12,6 +12,31 @@ All product logic lives in the Go backend; the desktop binary stays
 thin so iterating on the analyst experience never requires rebuilding
 native code.
 
+## Repository layout
+
+- `web/` — Vite + React + TypeScript + Tailwind source for the SPA.
+- `dist/` — Built SPA bundle, committed to the repo so `go build` can
+  pick it up via `//go:embed`. Regenerate with
+  `cd desktop/web && npm install && npm run build`.
+- `src-tauri/` — Rust crate for the Tauri shell (sidecar + window).
+- `embed.go` — Bridges `dist/` into the Go binary at compile time.
+
+## Iterating on the SPA
+
+```bash
+cd desktop/web
+npm install            # one-time
+npm run dev            # Vite dev server at http://127.0.0.1:5173
+# In another terminal:
+cd ../..
+./golantern serve      # Backend on http://127.0.0.1:8000
+```
+
+The Vite dev server proxies `/api` and `/healthz` through to the
+backend, so the SPA at :5173 hot-reloads while talking to the real
+API. When done, `npm run build` regenerates `dist/`; commit the new
+`dist/` along with the source changes.
+
 ## Two execution modes
 
 | Mode    | When                                       | Backend invocation                        |

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Custom design tokens layered on top of Tailwind. Keep this short:
+ * everything that can be a utility class should be one. This file is
+ * for app-wide tweaks that don't fit cleanly in a class. */
+
+@layer base {
+  /* Inputs and buttons should inherit the document's font so we don't
+   * get a fallback sans-serif inside form controls. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
