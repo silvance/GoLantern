@@ -95,3 +95,75 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     updated_at            DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_audit_logs_project ON audit_logs(project_id);
+
+-- Entities: single-table polymorphism keyed by (project_id, kind,
+-- value). Attributes is JSON; the runner merges on Upsert. Kind enum
+-- matches the SQLAlchemy member names (uppercase) — same convention
+-- as everywhere else in this schema.
+CREATE TABLE IF NOT EXISTS entities (
+    id         VARCHAR(32) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind       VARCHAR(32) NOT NULL
+        CHECK (kind IN ('DOMAIN','SUBDOMAIN','IP','URL','EMAIL','PERSON',
+                        'DOCUMENT','TECHNOLOGY','PORT','SERVICE',
+                        'ORGANIZATION','REPOSITORY')),
+    value      VARCHAR(1024) NOT NULL,
+    attributes TEXT NOT NULL DEFAULT '{}',  -- JSON
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uq_entities_project_kind_value UNIQUE (project_id, kind, value)
+);
+CREATE INDEX IF NOT EXISTS ix_entities_project_kind ON entities(project_id, kind);
+
+-- Findings: analyst-facing. Severity / Confidence enums stored as
+-- SQLAlchemy member names. The Python head schema carries reportable /
+-- reviewed / cvss_* / reproduction_steps columns from later
+-- migrations; the Go domain model doesn't surface those yet, so they
+-- live on the table (NULLable / defaulted) for forward compatibility
+-- with the Python service writing to the same DB.
+CREATE TABLE IF NOT EXISTS findings (
+    id             VARCHAR(32) PRIMARY KEY,
+    project_id     VARCHAR(32) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title          VARCHAR(512) NOT NULL,
+    description    TEXT,
+    recommendation TEXT,
+    severity       VARCHAR(16) NOT NULL
+        CHECK (severity IN ('INFO','LOW','MEDIUM','HIGH','CRITICAL')),
+    confidence     VARCHAR(16) NOT NULL
+        CHECK (confidence IN ('LOW','MEDIUM','HIGH','CONFIRMED')),
+    category       VARCHAR(128),
+    reportable     INTEGER NOT NULL DEFAULT 1,
+    reviewed       INTEGER NOT NULL DEFAULT 0,
+    attributes     TEXT NOT NULL DEFAULT '{}',  -- JSON
+    created_at     DATETIME NOT NULL,
+    updated_at     DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_findings_project ON findings(project_id);
+
+-- Evidence: a single observation linking an entity (or finding) back
+-- to a tool execution. Either entity_id or finding_id may be set;
+-- both, both nil, or just one is legal. tool_execution_id goes NULL
+-- when the parent ToolExecution row is deleted so the evidence trail
+-- survives.
+CREATE TABLE IF NOT EXISTS evidence (
+    id                VARCHAR(32) PRIMARY KEY,
+    project_id        VARCHAR(32) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    entity_id         VARCHAR(32) REFERENCES entities(id) ON DELETE CASCADE,
+    finding_id        VARCHAR(32) REFERENCES findings(id) ON DELETE CASCADE,
+    tool_execution_id VARCHAR(32) REFERENCES tool_executions(id) ON DELETE SET NULL,
+    source_tool       VARCHAR(128) NOT NULL,
+    source_category   VARCHAR(32) NOT NULL
+        CHECK (source_category IN ('PUBLIC_OSINT','PASSIVE_DNS','CERT_TRANSPARENCY',
+                                   'BREACH_INTEL','DOC_METADATA','LIVE_PROBE',
+                                   'ACTIVE_SCAN','MANUAL')),
+    confidence        VARCHAR(16) NOT NULL
+        CHECK (confidence IN ('LOW','MEDIUM','HIGH','CONFIRMED')),
+    payload           TEXT NOT NULL DEFAULT '{}',  -- JSON
+    artifact_uri      VARCHAR(1024),
+    notes             TEXT,
+    created_at        DATETIME NOT NULL,
+    updated_at        DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_evidence_entity ON evidence(entity_id);
+CREATE INDEX IF NOT EXISTS ix_evidence_finding ON evidence(finding_id);
+CREATE INDEX IF NOT EXISTS ix_evidence_project ON evidence(project_id);

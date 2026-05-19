@@ -207,12 +207,6 @@ func openRepos(dbPath string, logger *slog.Logger, seedDemo bool) (*repos, func(
 		return nil, nil, err
 	}
 	st := sqlite.NewStore(db)
-	// SQLite entity/finding repos aren't ported yet (Phase 4 deferred
-	// them). For now the SQLite branch borrows the in-memory ones for
-	// scan-engine state — collector runs persist in RAM and disappear
-	// at shutdown, while projects/scopes/runs/audit survive on disk.
-	// The SQLite ports for those land before Phase 7.
-	mem := memory.New()
 	if seedDemo {
 		if err := seedDemoInto(context.Background(), st.Projects, st.Scopes, st.Runs); err != nil {
 			db.Close()
@@ -222,7 +216,7 @@ func openRepos(dbPath string, logger *slog.Logger, seedDemo bool) (*repos, func(
 	}
 	return &repos{
 			Projects: st.Projects, Scopes: st.Scopes, Runs: st.Runs, Audit: st.Audit,
-			Entities: mem.Entities, Findings: mem.Findings,
+			Entities: st.Entities, Findings: st.Findings,
 		}, func() {
 			db.Close()
 		}, nil
