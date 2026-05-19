@@ -143,6 +143,277 @@ func TestListRunsNewestFirst(t *testing.T) {
 	}
 }
 
+// ----- write-side: projects CRUD --------------------------------------
+
+func patchJSON(t *testing.T, url string, body any) (int, []byte) {
+	t.Helper()
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPatch, url, bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
+func TestCreateProjectMinimal(t *testing.T) {
+	srv, st := newTestServer(t)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{"name": "MinProj"})
+	if status != 201 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got projectDTO
+	json.Unmarshal(body, &got)
+	if got.Name != "MinProj" || got.DefaultScope != "passive" || got.Mode != "assessment" {
+		t.Fatalf("defaults not applied: %+v", got)
+	}
+	rows, _ := st.Audit.ListByProject(context.Background(), got.ID)
+	if len(rows) != 1 || rows[0].Action != audit.ActionProjectCreated {
+		t.Fatalf("audit missing: %+v", rows)
+	}
+}
+
+func TestCreateProjectFullPayload(t *testing.T) {
+	srv, _ := newTestServer(t)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{
+		"name":          "Full",
+		"description":   "hello",
+		"organization":  "Acme",
+		"default_scope": "light_active",
+		"mode":          "bug_bounty",
+	})
+	if status != 201 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got projectDTO
+	json.Unmarshal(body, &got)
+	if got.DefaultScope != "light_active" || got.Mode != "bug_bounty" {
+		t.Fatalf("payload not applied: %+v", got)
+	}
+}
+
+func TestCreateProjectValidation(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cases := []struct {
+		name string
+		body any
+		want int
+	}{
+		{"empty name", map[string]any{"name": "  "}, 400},
+		{"bad scope", map[string]any{"name": "X", "default_scope": "bogus"}, 400},
+		{"bad mode", map[string]any{"name": "X", "mode": "bogus"}, 400},
+		{"unknown field", map[string]any{"name": "X", "foo": "bar"}, 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			status, _ := postJSON(t, srv.URL+"/api/v1/projects", c.body)
+			if status != c.want {
+				t.Fatalf("status=%d, want %d", status, c.want)
+			}
+		})
+	}
+}
+
+func TestCreateProjectDuplicateName(t *testing.T) {
+	srv, _ := newTestServer(t)
+	if status, _ := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{"name": "Dup"}); status != 201 {
+		t.Fatal("first create failed")
+	}
+	status, _ := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{"name": "Dup"})
+	if status != 409 {
+		t.Fatalf("status=%d, want 409", status)
+	}
+}
+
+func TestCreateProjectCTFAutoRule(t *testing.T) {
+	srv, st := newTestServer(t)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{
+		"name":   "CTFBox",
+		"mode":   "ctf",
+		"target": "10.10.11.219",
+	})
+	if status != 201 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got projectDTO
+	json.Unmarshal(body, &got)
+	rules, _ := st.Scopes.ListByProject(context.Background(), got.ID)
+	if len(rules) != 1 || rules[0].Rule.Pattern != "10.10.11.219" || rules[0].Rule.Kind != scope.KindFullActive {
+		t.Fatalf("CTF auto-rule wrong: %+v", rules)
+	}
+	// Audit detail.kind_source should be "ctf_auto".
+	rows, _ := st.Audit.ListByProject(context.Background(), got.ID)
+	var sawAuto bool
+	for _, r := range rows {
+		if r.Action == audit.ActionScopeRuleCreated && r.Detail["kind_source"] == "ctf_auto" {
+			sawAuto = true
+		}
+	}
+	if !sawAuto {
+		t.Fatalf("ctf_auto audit row missing: %+v", rows)
+	}
+}
+
+func TestCreateProjectTargetIgnoredForNonCTF(t *testing.T) {
+	srv, st := newTestServer(t)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects", map[string]any{
+		"name":   "BountyProj",
+		"mode":   "bug_bounty",
+		"target": "*.example.com",
+	})
+	if status != 201 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got projectDTO
+	json.Unmarshal(body, &got)
+	rules, _ := st.Scopes.ListByProject(context.Background(), got.ID)
+	if len(rules) != 0 {
+		t.Fatalf("target should be ignored for non-CTF; got rules=%+v", rules)
+	}
+}
+
+func TestUpdateProjectPartial(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := &project.Project{Name: "OrigName", Description: "old", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(context.Background(), p)
+	status, body := patchJSON(t, srv.URL+"/api/v1/projects/"+p.ID, map[string]any{
+		"description": "new",
+		"mode":        "ctf",
+	})
+	if status != 200 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got projectDTO
+	json.Unmarshal(body, &got)
+	if got.Description != "new" || got.Mode != "ctf" || got.Name != "OrigName" {
+		t.Fatalf("partial update wrong: %+v", got)
+	}
+	rows, _ := st.Audit.ListByProject(context.Background(), p.ID)
+	if len(rows) != 1 || rows[0].Action != audit.ActionProjectUpdated {
+		t.Fatalf("audit missing: %+v", rows)
+	}
+}
+
+func TestUpdateProjectValidation(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := &project.Project{Name: "X", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(context.Background(), p)
+	cases := []struct {
+		name string
+		body any
+		want int
+	}{
+		{"empty body", map[string]any{}, 400},
+		{"unknown field", map[string]any{"foo": "bar"}, 400},
+		{"empty name", map[string]any{"name": ""}, 400},
+		{"bad scope", map[string]any{"default_scope": "bogus"}, 400},
+		{"bad mode", map[string]any{"mode": "bogus"}, 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			status, _ := patchJSON(t, srv.URL+"/api/v1/projects/"+p.ID, c.body)
+			if status != c.want {
+				t.Fatalf("status=%d, want %d", status, c.want)
+			}
+		})
+	}
+}
+
+func TestDeleteProjectAuditsBeforeDelete(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := &project.Project{Name: "Doomed", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
+	_ = st.Projects.Save(context.Background(), p)
+	if got := deleteReq(t, srv.URL+"/api/v1/projects/"+p.ID); got != 204 {
+		t.Fatalf("status=%d, want 204", got)
+	}
+	// Verify the project is gone but the audit row survived (in-memory
+	// store retains audit rows even though it doesn't simulate FK
+	// SET NULL — the SQLite test pins the FK behaviour).
+	if _, err := st.Projects.Get(context.Background(), p.ID); err == nil {
+		t.Fatal("project still exists after delete")
+	}
+	rows, _ := st.Audit.ListByProject(context.Background(), p.ID)
+	if len(rows) != 1 || rows[0].Action != audit.ActionProjectDeleted {
+		t.Fatalf("audit row missing: %+v", rows)
+	}
+}
+
+// ----- write-side: runs ------------------------------------------------
+
+func TestCreateRunEmptyToolsCompletesInline(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := seedProject(t, st) // assessment, no rules
+	// SCOPE has no prereqs so it should always start.
+	status, body := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/runs", map[string]any{
+		"phase": "scope",
+		"label": "declared",
+	})
+	if status != 201 {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+	var got runDTO
+	json.Unmarshal(body, &got)
+	if got.Status != "completed" {
+		t.Fatalf("empty-tools run should complete inline; got status=%s", got.Status)
+	}
+	// Two audit rows: created + finished.
+	rows, _ := st.Audit.ListByProject(context.Background(), p.ID)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 audit rows, got %d: %+v", len(rows), rows)
+	}
+}
+
+func TestCreateRunWithToolsIs501(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := seedProject(t, st)
+	status, body := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/runs", map[string]any{
+		"phase": "scope",
+		"tools": []map[string]any{{"tool": "crtsh"}},
+	})
+	if status != 501 {
+		t.Fatalf("status=%d body=%s, want 501", status, body)
+	}
+}
+
+func TestCreateRunPrereqUnmetIs409(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := seedProject(t, st)
+	// OSINT needs SCOPE; a fresh assessment project with no rules is blocked.
+	status, body := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/runs", map[string]any{
+		"phase": "osint",
+	})
+	if status != 409 {
+		t.Fatalf("status=%d body=%s, want 409", status, body)
+	}
+}
+
+func TestCreateRunCTFBypassesPrereq(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := &project.Project{Name: "Box", DefaultScope: scope.KindPassive, Mode: project.ModeCTF}
+	_ = st.Projects.Save(context.Background(), p)
+	// Validation usually needs Asset Discovery; CTF short-circuits.
+	status, body := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/runs", map[string]any{
+		"phase": "validation",
+	})
+	if status != 201 {
+		t.Fatalf("CTF should bypass prereqs; status=%d body=%s", status, body)
+	}
+}
+
+func TestCreateRunBadPhaseIs400(t *testing.T) {
+	srv, st := newTestServer(t)
+	p := seedProject(t, st)
+	status, _ := postJSON(t, srv.URL+"/api/v1/projects/"+p.ID+"/runs", map[string]any{
+		"phase": "not_a_phase",
+	})
+	if status != 400 {
+		t.Fatalf("status=%d, want 400", status)
+	}
+}
+
 // ----- write-side: scope rules CRUD -----------------------------------
 
 func postJSON(t *testing.T, url string, body any) (int, []byte) {

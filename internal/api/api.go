@@ -20,8 +20,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/silvance/golantern/internal/audit"
+	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
@@ -62,13 +64,17 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/projects", s.handleListProjects)
+	mux.HandleFunc("POST /api/v1/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}", s.handleGetProject)
+	mux.HandleFunc("PATCH /api/v1/projects/{id}", s.handleUpdateProject)
+	mux.HandleFunc("DELETE /api/v1/projects/{id}", s.handleDeleteProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}/scope-rules", s.handleListScopeRules)
 	mux.HandleFunc("POST /api/v1/projects/{id}/scope-rules", s.handleCreateScopeRule)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}/scope-rules/{ruleID}", s.handleDeleteScopeRule)
 	mux.HandleFunc("GET /api/v1/projects/{id}/scope/test", s.handleScopeTest)
 	mux.HandleFunc("GET /api/v1/projects/{id}/audit-logs", s.handleListAuditLogs)
 	mux.HandleFunc("GET /api/v1/projects/{id}/runs", s.handleListRuns)
+	mux.HandleFunc("POST /api/v1/projects/{id}/runs", s.handleCreateRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
 	return mux
@@ -100,6 +106,229 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectDTO(p))
+}
+
+// handleCreateProject implements POST /api/v1/projects.
+//
+// Body: ProjectCreate (name required; default_scope defaults to passive;
+// mode defaults to assessment; target is honored only when mode=ctf).
+// Returns 201 with the new project. CTF auto-rule mirrors Python's
+// schemas/project.py contract: a single FULL_ACTIVE ScopeRule is added
+// for `target` when mode=CTF, with audit detail.kind_source="ctf_auto".
+func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
+	var req createProjectRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("name is required"))
+		return
+	}
+
+	defScope := scope.RuleKind(strings.ToLower(strings.TrimSpace(req.DefaultScope)))
+	if defScope == "" {
+		defScope = scope.KindPassive
+	}
+	if !defScope.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid default_scope %q", req.DefaultScope)))
+		return
+	}
+	mode := project.Mode(strings.ToLower(strings.TrimSpace(req.Mode)))
+	if mode == "" {
+		mode = project.ModeAssessment
+	}
+	if !mode.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid mode %q", req.Mode)))
+		return
+	}
+
+	p := &project.Project{
+		Name:         req.Name,
+		Description:  strings.TrimSpace(req.Description),
+		Organization: strings.TrimSpace(req.Organization),
+		DefaultScope: defScope,
+		Mode:         mode,
+	}
+	if err := s.Projects.Save(r.Context(), p); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	// project.created audit. Detail mirrors Python exactly.
+	if err := s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           p.ID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionProjectCreated,
+		Target:              p.Name,
+		Detail: map[string]any{
+			"default_scope": string(p.DefaultScope),
+			"mode":          string(p.Mode),
+		},
+	}); err != nil {
+		s.Logger.WarnContext(r.Context(), "audit record failed",
+			slog.String("action", audit.ActionProjectCreated),
+			slog.Any("err", err))
+	}
+
+	// CTF auto-rule. Non-CTF modes ignore the target field on purpose.
+	target := strings.TrimSpace(req.Target)
+	if target != "" && p.Mode == project.ModeCTF {
+		sr := &scope.StoredRule{
+			ProjectID: p.ID,
+			Rule:      scope.Rule{Pattern: target, Kind: scope.KindFullActive},
+			Note:      "auto-created from CTF project target",
+		}
+		if err := s.Scopes.Add(r.Context(), sr); err != nil {
+			// Failure here is non-fatal for the project create; surface
+			// it in the response logs but still return the project so
+			// the SPA can present a useful state.
+			s.Logger.WarnContext(r.Context(), "CTF auto-rule failed",
+				slog.String("project_id", p.ID),
+				slog.Any("err", err))
+		} else {
+			_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+				ProjectID:           p.ID,
+				ProjectNameSnapshot: p.Name,
+				Action:              audit.ActionScopeRuleCreated,
+				Target:              sr.Rule.Pattern,
+				Detail: map[string]any{
+					"kind":        string(sr.Rule.Kind),
+					"note":        sr.Note,
+					"kind_source": "ctf_auto",
+				},
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, toProjectDTO(p))
+}
+
+// handleUpdateProject implements PATCH /api/v1/projects/{id}.
+//
+// Partial update: only fields present in the JSON body are touched.
+// Empty-string values clear the field on the project (description /
+// organization). Audit detail records the actual changes, matching
+// Python's model_dump(exclude_unset=True) behaviour.
+func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	// Use a map first so we can tell "absent" from "explicit empty".
+	var raw map[string]json.RawMessage
+	if err := decodeJSONBody(r, &raw); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	if len(raw) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody("no fields to update"))
+		return
+	}
+
+	changes := make(map[string]any, len(raw))
+	allowed := map[string]bool{
+		"name": true, "description": true, "organization": true,
+		"default_scope": true, "mode": true,
+	}
+	for k, v := range raw {
+		if !allowed[k] {
+			writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("unknown field %q", k)))
+			return
+		}
+		var sv string
+		if err := json.Unmarshal(v, &sv); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("field %q must be a string", k)))
+			return
+		}
+		changes[k] = sv
+	}
+
+	if v, ok := changes["name"]; ok {
+		name := strings.TrimSpace(v.(string))
+		if name == "" {
+			writeJSON(w, http.StatusBadRequest, errorBody("name cannot be empty"))
+			return
+		}
+		p.Name = name
+	}
+	if v, ok := changes["description"]; ok {
+		p.Description = v.(string)
+	}
+	if v, ok := changes["organization"]; ok {
+		p.Organization = v.(string)
+	}
+	if v, ok := changes["default_scope"]; ok {
+		k := scope.RuleKind(strings.ToLower(strings.TrimSpace(v.(string))))
+		if !k.Valid() {
+			writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid default_scope %q", v)))
+			return
+		}
+		p.DefaultScope = k
+	}
+	if v, ok := changes["mode"]; ok {
+		m := project.Mode(strings.ToLower(strings.TrimSpace(v.(string))))
+		if !m.Valid() {
+			writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid mode %q", v)))
+			return
+		}
+		p.Mode = m
+	}
+
+	if err := s.Projects.Save(r.Context(), p); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	if err := s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           p.ID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionProjectUpdated,
+		Target:              p.Name,
+		Detail:              changes,
+	}); err != nil {
+		s.Logger.WarnContext(r.Context(), "audit record failed",
+			slog.String("action", audit.ActionProjectUpdated),
+			slog.Any("err", err))
+	}
+
+	writeJSON(w, http.StatusOK, toProjectDTO(p))
+}
+
+// handleDeleteProject implements DELETE /api/v1/projects/{id}.
+// 204 on success, 404 if missing.
+//
+// Audit row is recorded BEFORE the delete so the project_name_snapshot
+// resolution still works inside record_audit (mirrors Python's pattern
+// in delete_project). The audit row's project_id is set NULL by the FK
+// on the cascade; the snapshot keeps the trail readable.
+func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           p.ID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionProjectDeleted,
+		Target:              p.Name,
+		Detail: map[string]any{
+			"default_scope": string(p.DefaultScope),
+			"mode":          string(p.Mode),
+			"organization":  p.Organization,
+		},
+	})
+	if err := s.Projects.Delete(r.Context(), projectID); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleListScopeRules(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +527,7 @@ func (s *Server) handleScopeTest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody("missing 'target' query parameter"))
 		return
 	}
-	pol, err := workflow.LoadPolicy(r.Context(), s.Projects, s.Scopes, r.PathValue("id"))
+	pol, err := engine.LoadPolicy(r.Context(), s.Projects, s.Scopes, r.PathValue("id"))
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -325,6 +554,107 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		out[i] = toRunDTO(ru)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleCreateRun implements POST /api/v1/projects/{id}/runs.
+//
+// Body: {phase, label?, parameters?, tools?}.
+//
+// Phase prerequisites are checked via engine.CanStartPhase (CTF mode
+// short-circuits; SCOPE is satisfied by any ScopeRule). Failure is
+// 409 with the human-readable reason from the engine package.
+//
+// Tool dispatch is NOT yet ported: an empty tools list takes the
+// Python "intentional skip" path (mark COMPLETED inline so the
+// operator can declare a phase done without running collectors), but a
+// non-empty tools list returns 501 with a clear message that the job
+// queue lands in Phase 5. This is deliberately distinct from a silent
+// no-op so SPA flows that depend on queueing fail loudly.
+func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	var req createRunRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody(err.Error()))
+		return
+	}
+	phase := workflow.Phase(strings.ToLower(strings.TrimSpace(req.Phase)))
+	if !phase.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid phase %q", req.Phase)))
+		return
+	}
+
+	ok, reason, err := engine.CanStartPhase(r.Context(), s.Projects, s.Scopes, s.Runs, projectID, phase)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusConflict, errorBody(reason))
+		return
+	}
+
+	if len(req.Tools) > 0 {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"tool dispatch not yet ported: pass tools=[] to create an empty run, "+
+				"or wait for the queue to land in Phase 5"))
+		return
+	}
+
+	now := time.Now().UTC()
+	params := req.Parameters
+	if params == nil {
+		params = map[string]any{}
+	}
+	ru := &run.Run{
+		ProjectID:  projectID,
+		Phase:      phase,
+		Status:     run.StatusPending,
+		Label:      strings.TrimSpace(req.Label),
+		Parameters: params,
+	}
+	if err := s.Runs.Save(r.Context(), ru); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionRunCreated,
+		Target:              ru.ID,
+		Detail: map[string]any{
+			"phase": string(ru.Phase),
+			"label": ru.Label,
+		},
+	})
+
+	// Empty tools list: mark COMPLETED inline. Python's create_run uses
+	// the same shortcut so phases like SCOPE (no collectors) can be
+	// declared done without queueing a no-op job.
+	ru.Status = run.StatusCompleted
+	ru.StartedAt = &now
+	ru.FinishedAt = &now
+	if err := s.Runs.Save(r.Context(), ru); err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	_ = s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: p.Name,
+		Action:              audit.ActionRunFinished,
+		Target:              ru.ID,
+		Detail: map[string]any{
+			"status": string(ru.Status),
+			"phase":  string(ru.Phase),
+		},
+	})
+
+	writeJSON(w, http.StatusCreated, toRunDTO(ru))
 }
 
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
@@ -470,6 +800,29 @@ type createScopeRuleRequest struct {
 	Pattern string `json:"pattern"`
 	Kind    string `json:"kind,omitempty"`
 	Note    string `json:"note,omitempty"`
+}
+
+type createProjectRequest struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Organization string `json:"organization,omitempty"`
+	DefaultScope string `json:"default_scope,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	// Target is only honored when Mode is "ctf"; non-CTF modes ignore
+	// it. See lantern/schemas/project.py for the rationale.
+	Target string `json:"target,omitempty"`
+}
+
+type toolInvocation struct {
+	Tool       string         `json:"tool"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+type createRunRequest struct {
+	Phase      string           `json:"phase"`
+	Label      string           `json:"label,omitempty"`
+	Parameters map[string]any   `json:"parameters,omitempty"`
+	Tools      []toolInvocation `json:"tools,omitempty"`
 }
 
 type auditLogDTO struct {

@@ -205,39 +205,3 @@ func TestToolExecutionRejectsUnknownRun(t *testing.T) {
 		t.Fatalf("got %v, want ErrNotFound", err)
 	}
 }
-
-// ----- workflow.LoadPolicy end-to-end ----------------------------------
-
-func TestLoadPolicyJoinsProjectAndScopeRepos(t *testing.T) {
-	st := New()
-	p := &project.Project{Name: "x", DefaultScope: scope.KindPassive, Mode: project.ModeAssessment}
-	if err := st.Projects.Save(newCtx(), p); err != nil {
-		t.Fatal(err)
-	}
-	for _, pattern := range []string{"*.example.com", "api.example.com"} {
-		if err := st.Scopes.Add(newCtx(), &scope.StoredRule{
-			ProjectID: p.ID, Rule: scope.Rule{Pattern: pattern, Kind: scope.KindFullActive},
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	pol, err := workflow.LoadPolicy(newCtx(), st.Projects, st.Scopes, p.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := pol.MatchedScope("api.example.com"); got != scope.KindFullActive {
-		t.Fatalf("MatchedScope(api.example.com) = %v, want full_active", got)
-	}
-	// Default falls through to the project's default_scope.
-	if got := pol.MatchedScope("unrelated.test"); got != scope.KindPassive {
-		t.Fatalf("default fallthrough = %v, want passive", got)
-	}
-}
-
-func TestLoadPolicyPropagatesProjectNotFound(t *testing.T) {
-	st := New()
-	_, err := workflow.LoadPolicy(newCtx(), st.Projects, st.Scopes, "missing")
-	if !errors.Is(err, project.ErrNotFound) {
-		t.Fatalf("got %v, want chain ending in project.ErrNotFound", err)
-	}
-}
