@@ -1,8 +1,10 @@
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import type { ToolInvocation } from "../api/types";
 import {
+  Button,
   Card,
   Empty,
   ErrorMessage,
@@ -16,6 +18,7 @@ import { useRunEvents } from "../hooks/useRunEvents";
 export default function RunDetailPage() {
   const { projectID = "", runID = "" } = useParams();
   const qc = useQueryClient();
+  const nav = useNavigate();
   const runQ = useQuery({
     queryKey: ["run", runID],
     queryFn: () => api.getRun(runID),
@@ -50,6 +53,27 @@ export default function RunDetailPage() {
   });
 
   const { events, status: sseStatus } = useRunEvents(runID);
+
+  // Re-run: POST a new run with the same phase + tool list this run
+  // dispatched. Built from the tool_executions we already loaded so
+  // we don't have to round-trip the original Run.parameters JSON.
+  const rerun = useMutation({
+    mutationFn: () => {
+      const tools: ToolInvocation[] = (txsQ.data ?? []).map((tx) => ({
+        tool: tx.tool,
+        parameters: tx.parameters,
+      }));
+      return api.createRun(projectID, {
+        phase: runQ.data!.phase,
+        label: runQ.data!.label ? `${runQ.data!.label} (rerun)` : undefined,
+        tools,
+      });
+    },
+    onSuccess: (newRun) => {
+      qc.invalidateQueries({ queryKey: ["runs", projectID] });
+      nav(`/projects/${projectID}/runs/${newRun.id}`);
+    },
+  });
 
   // When a tool finishes (or emits anything report-shaped), invalidate
   // the project-level caches so the user's other tabs come back to
@@ -89,18 +113,32 @@ export default function RunDetailPage() {
       </Link>
       <PageTitle
         actions={
-          <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                sseStatus === "live"
-                  ? "bg-emerald-500 animate-pulse"
-                  : sseStatus === "connecting"
-                    ? "bg-amber-500"
-                    : "bg-slate-400"
-              }`}
-            />
-            events: {sseStatus}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  sseStatus === "live"
+                    ? "bg-emerald-500 animate-pulse"
+                    : sseStatus === "connecting"
+                      ? "bg-amber-500"
+                      : "bg-slate-400"
+                }`}
+              />
+              events: {sseStatus}
+            </span>
+            {(run.status === "completed" ||
+              run.status === "failed" ||
+              run.status === "cancelled") &&
+              (txsQ.data?.length ?? 0) > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => rerun.mutate()}
+                  disabled={rerun.isPending}
+                >
+                  {rerun.isPending ? "Starting..." : "Run again"}
+                </Button>
+              )}
+          </div>
         }
       >
         {run.label || `Run ${run.id.slice(0, 8)}`}
@@ -165,7 +203,15 @@ export default function RunDetailPage() {
         </Card>
       )}
 
-      <SectionTitle>Live event feed</SectionTitle>
+      <SectionTitle
+        actions={
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {events.length} event{events.length === 1 ? "" : "s"}
+          </span>
+        }
+      >
+        Live event feed
+      </SectionTitle>
       <Card>
         {events.length === 0 ? (
           <Empty>No events yet. Connected; waiting for activity.</Empty>
@@ -175,12 +221,16 @@ export default function RunDetailPage() {
               .slice()
               .reverse()
               .map((e, i) => (
-                <li key={`${e.ts}-${i}`} className="px-4 py-2 text-xs">
-                  <span className="font-mono text-slate-500 dark:text-slate-400">
+                <li key={`${e.ts}-${i}`} className="px-4 py-2 text-xs flex gap-2 items-baseline">
+                  <span className="font-mono text-slate-400 shrink-0">
                     {new Date(e.ts).toLocaleTimeString()}
-                  </span>{" "}
-                  <span className="font-medium">{e.kind}</span>{" "}
-                  <span className="text-slate-600 dark:text-slate-300">
+                  </span>
+                  <span
+                    className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${eventColor(e.kind)}`}
+                  >
+                    {e.kind}
+                  </span>
+                  <span className="text-slate-600 dark:text-slate-300 truncate">
                     {summarizePayload(e.payload)}
                   </span>
                 </li>
@@ -200,4 +250,23 @@ function summarizePayload(p?: Record<string, unknown>) {
     if (k in p) bits.push(`${k}=${String(p[k])}`);
   }
   return bits.join(" ");
+}
+
+function eventColor(kind: string): string {
+  switch (kind) {
+    case "tool.started":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200";
+    case "tool.finished":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200";
+    case "entity.emitted":
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+    case "finding.emitted":
+      return "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
+    case "evidence.emitted":
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+    case "relation.emitted":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200";
+    default:
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+  }
 }
