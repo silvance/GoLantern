@@ -1,15 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import {
   Button,
-  Card,
-  Empty,
   ErrorMessage,
-  Input,
   PageTitle,
-  SectionTitle,
   Spinner,
 } from "../components/ui";
 import OverviewTab from "./tabs/OverviewTab";
@@ -18,6 +14,8 @@ import RunsTab from "./tabs/RunsTab";
 import FindingsTab from "./tabs/FindingsTab";
 import EntitiesTab from "./tabs/EntitiesTab";
 import ArtifactsTab from "./tabs/ArtifactsTab";
+import AssistantTab from "./tabs/AssistantTab";
+import AuditTab from "./tabs/AuditTab";
 
 type TabKey =
   | "overview"
@@ -25,7 +23,9 @@ type TabKey =
   | "runs"
   | "findings"
   | "entities"
-  | "artifacts";
+  | "artifacts"
+  | "assistant"
+  | "audit";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "Overview" },
@@ -34,13 +34,33 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "findings", label: "Findings" },
   { key: "entities", label: "Entities" },
   { key: "artifacts", label: "Artifacts" },
+  { key: "assistant", label: "Assistant" },
+  { key: "audit", label: "Audit" },
 ];
+
+const VALID_TABS = new Set<string>(TABS.map((t) => t.key));
 
 export default function ProjectDetailPage() {
   const { projectID = "" } = useParams();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab: TabKey =
+    tabParam && VALID_TABS.has(tabParam) ? (tabParam as TabKey) : "overview";
+
+  function setTab(next: TabKey) {
+    setSearchParams(
+      (prev) => {
+        const sp = new URLSearchParams(prev);
+        if (next === "overview") sp.delete("tab");
+        else sp.set("tab", next);
+        return sp;
+      },
+      { replace: true },
+    );
+  }
+
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const q = useQuery({
@@ -70,7 +90,11 @@ export default function ProjectDetailPage() {
         actions={
           confirmingDelete ? (
             <>
-              <Button variant="danger" onClick={() => del.mutate()} disabled={del.isPending}>
+              <Button
+                variant="danger"
+                onClick={() => del.mutate()}
+                disabled={del.isPending}
+              >
                 {del.isPending ? "Deleting..." : "Confirm delete"}
               </Button>
               <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
@@ -92,8 +116,8 @@ export default function ProjectDetailPage() {
         </p>
       )}
 
-      <div className="border-b border-slate-200 dark:border-slate-800 mb-6">
-        <nav className="flex gap-1 -mb-px">
+      <div className="border-b border-slate-200 dark:border-slate-800 mb-6 overflow-x-auto">
+        <nav className="flex gap-1 -mb-px whitespace-nowrap">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -116,10 +140,8 @@ export default function ProjectDetailPage() {
       {tab === "findings" && <FindingsTab projectID={projectID} />}
       {tab === "entities" && <EntitiesTab projectID={projectID} />}
       {tab === "artifacts" && <ArtifactsTab projectID={projectID} />}
+      {tab === "assistant" && <AssistantTab projectID={projectID} />}
+      {tab === "audit" && <AuditTab projectID={projectID} />}
     </div>
   );
 }
-
-// Convenience re-exports used by tab components (kept here so tab files
-// don't all need to reach back up to ../components/ui).
-export { Button, Card, Empty, ErrorMessage, Input, SectionTitle, Spinner };

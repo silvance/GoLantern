@@ -8,10 +8,14 @@ import type {
   Artifact,
   AssistantResponse,
   AuditLog,
+  Collector,
   CreateRunRequest,
+  DoctorEntry,
   Entity,
   Finding,
+  Phase,
   Project,
+  RecommendedToolsResponse,
   Run,
   ScopeKind,
   ScopeRule,
@@ -155,6 +159,14 @@ export const api = {
 
   listAuditLogs: (projectID: string) =>
     request<AuditLog[]>(`/api/v1/projects/${projectID}/audit-logs`),
+
+  // ----- Collectors -----------------------------------------------------
+  listCollectors: () => request<Collector[]>("/api/v1/collectors"),
+  recommendedTools: (projectID: string, phase: Phase) =>
+    request<RecommendedToolsResponse>(
+      `/api/v1/projects/${projectID}/recommended-tools?phase=${encodeURIComponent(phase)}`,
+    ),
+  doctor: () => request<DoctorEntry[]>("/api/v1/doctor"),
 
   // ----- Assistant ------------------------------------------------------
   ask: (projectID: string, question: string, mode?: string) =>

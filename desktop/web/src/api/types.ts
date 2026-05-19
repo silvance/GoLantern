@@ -126,7 +126,7 @@ export interface ScopeTestResult {
 }
 
 export interface AssistantResponse {
-  reply: string;
+  content: string;
   model: string;
   input_tokens?: number;
   output_tokens?: number;
@@ -141,5 +141,44 @@ export interface CreateRunRequest {
   phase: Phase;
   label?: string;
   tools?: ToolInvocation[];
+}
+
+export interface ParameterSpec {
+  name: string;
+  type: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  choices?: string[];
+  placeholder?: string;
+}
+
+export interface Collector {
+  name: string;
+  phase: Phase;
+  required_scope: ScopeKind;
+  description: string;
+  source_category?: string;
+  consumes: string[];
+  produces: string[];
+  triggers_on_services: string[];
+  binary?: string;
+  install_hint?: string;
+  parameters: ParameterSpec[];
+}
+
+export interface RecommendedToolsResponse {
+  phase: Phase;
+  mode: Mode;
+  tools: string[];
+}
+
+export interface DoctorEntry {
+  name: string;
+  phase: Phase;
+  binary?: string;
+  path?: string;
+  status: "ok" | "missing" | "no_binary";
+  install_hint?: string;
 }
 

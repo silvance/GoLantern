@@ -3,6 +3,7 @@ import ProjectsPage from "./pages/ProjectsPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 import NewProjectPage from "./pages/NewProjectPage";
 import RunDetailPage from "./pages/RunDetailPage";
+import DoctorPage from "./pages/DoctorPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
             path="/projects/:projectID/runs/:runID"
             element={<RunDetailPage />}
           />
+          <Route path="/doctor" element={<DoctorPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
@@ -56,6 +58,16 @@ function Header() {
             }
           >
             New project
+          </NavLink>
+          <NavLink
+            to="/doctor"
+            className={({ isActive }) =>
+              isActive
+                ? "text-blue-600 dark:text-blue-400 font-medium"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+            }
+          >
+            Doctor
           </NavLink>
         </nav>
       </div>

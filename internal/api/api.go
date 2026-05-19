@@ -20,6 +20,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/report"
 	"github.com/silvance/golantern/internal/run"
+	"github.com/silvance/golantern/internal/scan"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/workflow"
 )
@@ -55,6 +58,10 @@ type Server struct {
 	// nil, that endpoint returns 501.
 	Artifacts     artifact.Repository
 	ArtifactStore artifact.Store
+	// Registry is the collector registry. When set,
+	// GET /api/v1/collectors lists collector metadata for the UI's
+	// tool picker. nil → that endpoint returns 501.
+	Registry *scan.Registry
 	// Bus is optional. When set, GET /runs/{id}/events streams
 	// Server-Sent Events; nil makes that endpoint return 501.
 	Bus *events.Bus
@@ -135,6 +142,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{id}/assistant/ask", s.handleAssistantAsk)
 	mux.HandleFunc("GET /api/v1/projects/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
+	mux.HandleFunc("GET /api/v1/collectors", s.handleListCollectors)
+	mux.HandleFunc("GET /api/v1/projects/{id}/recommended-tools", s.handleRecommendedTools)
+	mux.HandleFunc("GET /api/v1/doctor", s.handleDoctor)
 	// Static SPA fallback. Anything not matched by the explicit /api
 	// or /healthz patterns above falls through to the embedded
 	// desktop/dist bundle. ServeMux's wildcard "/" pattern is the
@@ -240,6 +250,174 @@ func toArtifactDTO(a *artifact.Artifact) artifactDTO {
 		SHA256:      a.SHA256,
 		CreatedAt:   a.CreatedAt,
 	}
+}
+
+// handleListCollectors returns metadata for every collector
+// registered on the server. The SPA uses this to render the
+// run-create form's tool picker, grouped by phase. Returns 501 when
+// no registry is wired (tests + minimal API-only deployments).
+func (s *Server) handleListCollectors(w http.ResponseWriter, _ *http.Request) {
+	if s.Registry == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody("collector registry not configured"))
+		return
+	}
+	names := s.Registry.Names()
+	sort.Strings(names)
+	out := make([]collectorDTO, 0, len(names))
+	for _, name := range names {
+		factory, err := s.Registry.Get(name)
+		if err != nil {
+			continue // shouldn't happen — Names() came from the same registry
+		}
+		out = append(out, toCollectorDTO(factory().Metadata()))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRecommendedTools returns the workflow preset's
+// recommended-tool list for a given phase + the project's mode.
+// Query: ?phase=osint. Defaults to the project's first phase with
+// recommendations when phase is missing. Useful as a prefill when
+// the SPA opens the run-create form.
+func (s *Server) handleRecommendedTools(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	p, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	phaseStr := r.URL.Query().Get("phase")
+	if phaseStr == "" {
+		writeJSON(w, http.StatusBadRequest, errorBody("phase query parameter is required"))
+		return
+	}
+	phase := workflow.Phase(phaseStr)
+	if !phase.Valid() {
+		writeJSON(w, http.StatusBadRequest, errorBody(fmt.Sprintf("invalid phase %q", phaseStr)))
+		return
+	}
+	tools := workflow.RecommendedToolsForPhase(p.Mode, phase)
+	if tools == nil {
+		tools = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"phase": string(phase),
+		"mode":  string(p.Mode),
+		"tools": tools,
+	})
+}
+
+// collectorDTO and parameterSpecDTO mirror scan.Meta / scan.ParameterSpec
+// for the API surface so a refactor of either internal type doesn't
+// implicitly reshape the wire format.
+type collectorDTO struct {
+	Name                string             `json:"name"`
+	Phase               string             `json:"phase"`
+	RequiredScope       string             `json:"required_scope"`
+	Description         string             `json:"description"`
+	SourceCategory      string             `json:"source_category,omitempty"`
+	Consumes            []string           `json:"consumes"`
+	Produces            []string           `json:"produces"`
+	TriggersOnServices  []string           `json:"triggers_on_services"`
+	Binary              string             `json:"binary,omitempty"`
+	InstallHint         string             `json:"install_hint,omitempty"`
+	Parameters          []parameterSpecDTO `json:"parameters"`
+}
+
+type parameterSpecDTO struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Default     any      `json:"default,omitempty"`
+	Choices     []string `json:"choices,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+}
+
+func toCollectorDTO(m scan.Meta) collectorDTO {
+	consumes := make([]string, 0, len(m.Consumes))
+	for _, k := range m.Consumes {
+		consumes = append(consumes, string(k))
+	}
+	produces := make([]string, 0, len(m.Produces))
+	for _, k := range m.Produces {
+		produces = append(produces, string(k))
+	}
+	params := make([]parameterSpecDTO, 0, len(m.Parameters))
+	for _, p := range m.Parameters {
+		params = append(params, parameterSpecDTO{
+			Name:        p.Name,
+			Type:        p.Type,
+			Description: p.Description,
+			Required:    p.Required,
+			Default:     p.Default,
+			Choices:     p.Choices,
+			Placeholder: p.Placeholder,
+		})
+	}
+	return collectorDTO{
+		Name:               m.Name,
+		Phase:              string(m.Phase),
+		RequiredScope:      string(m.RequiredScope),
+		Description:        m.Description,
+		SourceCategory:     string(m.SourceCategory),
+		Consumes:           consumes,
+		Produces:           produces,
+		TriggersOnServices: m.TriggersOnServices,
+		Binary:             m.Binary,
+		InstallHint:        m.InstallHint,
+		Parameters:         params,
+	}
+}
+
+// handleDoctor probes PATH for every registered collector's binary
+// and reports presence + install hint. Used by the SPA's doctor view
+// to flag which collectors won't actually run on this host. Returns
+// 501 when no registry is wired.
+func (s *Server) handleDoctor(w http.ResponseWriter, _ *http.Request) {
+	if s.Registry == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody("collector registry not configured"))
+		return
+	}
+	names := s.Registry.Names()
+	sort.Strings(names)
+	out := make([]doctorEntryDTO, 0, len(names))
+	for _, name := range names {
+		factory, err := s.Registry.Get(name)
+		if err != nil {
+			continue
+		}
+		meta := factory().Metadata()
+		entry := doctorEntryDTO{
+			Name:        meta.Name,
+			Phase:       string(meta.Phase),
+			Binary:      meta.Binary,
+			InstallHint: meta.InstallHint,
+		}
+		if meta.Binary == "" {
+			entry.Status = "no_binary"
+		} else if path, err := exec.LookPath(meta.Binary); err == nil {
+			entry.Status = "ok"
+			entry.Path = path
+		} else {
+			entry.Status = "missing"
+		}
+		out = append(out, entry)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// doctorEntryDTO is one row in the doctor report. status takes one of:
+//   - "ok": binary is on PATH (path filled in)
+//   - "missing": collector declares a binary but it's not on PATH
+//   - "no_binary": collector has no external binary dependency
+type doctorEntryDTO struct {
+	Name        string `json:"name"`
+	Phase       string `json:"phase"`
+	Binary      string `json:"binary,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Status      string `json:"status"`
+	InstallHint string `json:"install_hint,omitempty"`
 }
 
 // handleAssistantAsk implements POST /api/v1/projects/{id}/assistant/ask.

@@ -228,6 +228,7 @@ func cmdServe(args []string) error {
 	srv.Findings = r.Findings
 	srv.Artifacts = artifactsRepo
 	srv.ArtifactStore = artifactStore
+	srv.Registry = reg
 	srv.Bus = bus
 	srv.Assistant = assistantProvider
 	srv.WebUI = desktop.Handler()

@@ -1,8 +1,8 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
-import type { Phase } from "../../api/types";
+import type { Phase, ToolInvocation } from "../../api/types";
 import {
   Button,
   Card,
@@ -14,6 +14,7 @@ import {
   Spinner,
   StatusBadge,
 } from "../../components/ui";
+import { ToolPicker } from "../../components/ToolPicker";
 
 const PHASES: Phase[] = [
   "scope",
@@ -28,6 +29,7 @@ const PHASES: Phase[] = [
 
 export default function RunsTab({ projectID }: { projectID: string }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const runsQ = useQuery({
     queryKey: ["runs", projectID],
     queryFn: () => api.listRuns(projectID),
@@ -35,19 +37,32 @@ export default function RunsTab({ projectID }: { projectID: string }) {
 
   const [phase, setPhase] = useState<Phase>("osint");
   const [label, setLabel] = useState("");
-  const [tools, setTools] = useState("");
+  const [tools, setTools] = useState<ToolInvocation[]>([]);
+
+  // Recommended-tools query keyed off the chosen phase. The picker
+  // auto-selects on first mount with a non-empty list.
+  const recQ = useQuery({
+    queryKey: ["recommended-tools", projectID, phase],
+    queryFn: () => api.recommendedTools(projectID, phase),
+  });
 
   const create = useMutation({
     mutationFn: () =>
       api.createRun(projectID, {
         phase,
         label: label || undefined,
-        tools: parseTools(tools),
+        tools,
       }),
-    onSuccess: () => {
+    onSuccess: (run) => {
       qc.invalidateQueries({ queryKey: ["runs", projectID] });
       setLabel("");
-      setTools("");
+      setTools([]);
+      // If the run dispatched any collectors, jump straight to the
+      // run detail page so the operator can watch the SSE feed.
+      // Metadata-only runs (no tools) stay on the list.
+      if (tools.length > 0) {
+        nav(`/projects/${projectID}/runs/${run.id}`);
+      }
     },
   });
 
@@ -60,53 +75,72 @@ export default function RunsTab({ projectID }: { projectID: string }) {
     <div className="space-y-6">
       <Card className="p-4">
         <SectionTitle>New run</SectionTitle>
-        <form onSubmit={onAdd} className="grid grid-cols-[180px_1fr_auto] gap-3 items-end">
-          <label className="block">
-            <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">Phase</span>
-            <Select value={phase} onChange={(e) => setPhase(e.target.value as Phase)} className="w-full">
-              {PHASES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="block">
-            <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">
-              Label (optional)
-            </span>
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Initial sweep"
-              className="w-full"
-            />
-          </label>
-          <Button type="submit" disabled={create.isPending}>
-            {create.isPending ? "Starting..." : "Start"}
-          </Button>
-          <label className="col-span-3 block">
-            <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">
-              Tools (comma-separated, optional). Leave empty for a metadata-only run.
-            </span>
-            <Input
+        <form onSubmit={onAdd} className="space-y-4">
+          <div className="grid grid-cols-[180px_1fr] gap-3">
+            <label className="block">
+              <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">Phase</span>
+              <Select
+                value={phase}
+                onChange={(e) => {
+                  setPhase(e.target.value as Phase);
+                  // Reset selection when phase changes; the picker
+                  // auto-selects the new phase's recommended tools.
+                  setTools([]);
+                }}
+                className="w-full"
+              >
+                {PHASES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">
+                Label (optional)
+              </span>
+              <Input
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Initial sweep"
+                className="w-full"
+              />
+            </label>
+          </div>
+
+          <div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              Tools for {phase} ({tools.length} selected)
+            </div>
+            <ToolPicker
+              phase={phase}
               value={tools}
-              onChange={(e) => setTools(e.target.value)}
-              placeholder="crtsh, theharvester"
-              className="w-full"
+              onChange={setTools}
+              recommended={recQ.data?.tools ?? []}
             />
-          </label>
+          </div>
+
+          {create.error && <ErrorMessage>{(create.error as Error).message}</ErrorMessage>}
+
+          <div className="flex gap-2">
+            <Button type="submit" disabled={create.isPending}>
+              {create.isPending ? "Starting..." : "Start run"}
+            </Button>
+            <span className="text-xs text-slate-500 dark:text-slate-400 self-center">
+              {tools.length === 0
+                ? "Metadata-only run — no collectors will dispatch."
+                : `${tools.length} collector${tools.length === 1 ? "" : "s"} will dispatch.`}
+            </span>
+          </div>
         </form>
-        {create.error && <ErrorMessage>{(create.error as Error).message}</ErrorMessage>}
       </Card>
 
       <div>
         <SectionTitle>History</SectionTitle>
         {runsQ.isLoading && <Spinner />}
         {runsQ.isError && <ErrorMessage>{(runsQ.error as Error).message}</ErrorMessage>}
-        {runsQ.data && runsQ.data.length === 0 && (
-          <Empty>No runs yet.</Empty>
-        )}
+        {runsQ.data && runsQ.data.length === 0 && <Empty>No runs yet.</Empty>}
         {runsQ.data && runsQ.data.length > 0 && (
           <Card>
             <table className="w-full text-sm">
@@ -145,12 +179,4 @@ export default function RunsTab({ projectID }: { projectID: string }) {
       </div>
     </div>
   );
-}
-
-function parseTools(raw: string) {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((tool) => ({ tool }));
 }
