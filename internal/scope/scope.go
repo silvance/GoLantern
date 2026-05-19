@@ -30,6 +30,17 @@ const (
 	KindDeny        RuleKind = "deny"
 )
 
+// Valid reports whether k is one of the defined kinds. Useful at
+// data-ingress points where the value originated outside the type
+// system (DB row, JSON request body).
+func (k RuleKind) Valid() bool {
+	switch k {
+	case KindPassive, KindLightActive, KindFullActive, KindDeny:
+		return true
+	}
+	return false
+}
+
 // rank orders authorization levels; higher requires stricter authorization.
 // Deny is sentinel-negative — it never satisfies any required level.
 func (k RuleKind) rank() int {
