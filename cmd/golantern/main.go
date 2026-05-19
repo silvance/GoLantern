@@ -17,6 +17,7 @@ import (
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/entity"
+	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/jobs"
 	"github.com/silvance/golantern/internal/project"
@@ -100,6 +101,7 @@ func cmdServe(args []string) error {
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
 	// dependency on engine.
+	bus := events.NewBus(logger)
 	executeRunDeps := engine.ExecuteRunDeps{
 		Runs: r.Runs,
 		ScanDeps: scan.Deps{
@@ -110,6 +112,7 @@ func cmdServe(args []string) error {
 		},
 		Registry: reg,
 		Audit:    r.Audit,
+		Bus:      bus,
 		Logger:   logger,
 		LoadPolicyFn: func(ctx context.Context, projectID string) (*scan.Deps, error) {
 			pol, err := engine.LoadPolicy(ctx, r.Projects, r.Scopes, projectID)
@@ -137,6 +140,7 @@ func cmdServe(args []string) error {
 	srv.Logger = logger
 	srv.Entities = r.Entities
 	srv.Findings = r.Findings
+	srv.Bus = bus
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
 		jobInvs := make([]jobs.Invocation, len(invocations))
 		for i, inv := range invocations {

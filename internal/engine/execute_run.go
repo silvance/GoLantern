@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/silvance/golantern/internal/audit"
+	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scan"
 )
@@ -29,6 +30,7 @@ type ExecuteRunDeps struct {
 	ScanDeps     scan.Deps // Entities/Findings; Scope is overwritten per-run by LoadPolicyFn
 	Registry     *scan.Registry
 	Audit        audit.Repository // optional
+	Bus          *events.Bus      // optional; publishes run.started / run.finished and wires the scan runner
 	Logger       *slog.Logger     // defaults to slog.Default
 	LoadPolicyFn func(ctx context.Context, projectID string) (*scan.Deps, error)
 }
@@ -99,6 +101,9 @@ func ExecuteRun(
 	if err != nil {
 		return fmt.Errorf("ExecuteRun: build runner: %w", err)
 	}
+	if deps.Bus != nil {
+		runner.SetBus(deps.Bus)
+	}
 
 	now := time.Now().UTC()
 	ru.Status = run.StatusRunning
@@ -107,6 +112,16 @@ func ExecuteRun(
 	}
 	if err := deps.Runs.Save(ctx, ru); err != nil {
 		return fmt.Errorf("ExecuteRun: mark running: %w", err)
+	}
+	if deps.Bus != nil {
+		deps.Bus.Publish(events.Event{
+			RunID: runID, Kind: events.KindRunStarted,
+			Payload: map[string]any{
+				"phase":       string(ru.Phase),
+				"tool_count":  len(invocations),
+				"label":       ru.Label,
+			},
+		})
 	}
 
 	anyFailed := false
@@ -167,6 +182,15 @@ func ExecuteRun(
 				slog.String("run_id", runID),
 				slog.Any("err", err))
 		}
+	}
+	if deps.Bus != nil {
+		deps.Bus.Publish(events.Event{
+			RunID: runID, Kind: events.KindRunFinished,
+			Payload: map[string]any{
+				"phase":  string(ru.Phase),
+				"status": string(ru.Status),
+			},
+		})
 	}
 	return nil
 }

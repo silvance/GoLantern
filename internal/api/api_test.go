@@ -1,15 +1,19 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/silvance/golantern/internal/audit"
+	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scope"
@@ -593,6 +597,162 @@ func TestDeleteScopeRuleCrossProjectBoundary(t *testing.T) {
 	if len(rules) != 1 {
 		t.Fatal("cross-project DELETE was allowed to remove the rule")
 	}
+}
+
+// ----- SSE event stream -----------------------------------------------
+
+// readSSEFrame reads SSE frames from r and returns the first frame
+// with actual event content. Keepalive-only frames (just a comment
+// line) are silently skipped — otherwise a 15s keepalive that arrived
+// before the data would surface as an empty event=""/data="" return.
+func readSSEFrame(t *testing.T, r *bufio.Reader) (event, data string) {
+	t.Helper()
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("readSSE: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			// End-of-frame. If we collected real content, return it;
+			// otherwise this was a comment-only keepalive — start the
+			// next frame.
+			if event != "" || data != "" {
+				return
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
+func TestSSETerminalRunEmitsOneFrameAndCloses(t *testing.T) {
+	st := memory.New()
+	bus := events.NewBus(nil)
+	srv := httptest.NewServer(serverWithBus(st, bus).Handler())
+	t.Cleanup(srv.Close)
+
+	p := seedProject(t, st)
+	ru := &run.Run{ProjectID: p.ID, Phase: workflow.PhaseOSINT, Status: run.StatusCompleted}
+	_ = st.Runs.Save(context.Background(), ru)
+
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + ru.ID + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("Content-Type=%q", got)
+	}
+	rd := bufio.NewReader(resp.Body)
+	ev, data := readSSEFrame(t, rd)
+	if ev != events.KindRunFinished {
+		t.Fatalf("event=%q, want run.finished", ev)
+	}
+	if !strings.Contains(data, `"status":"completed"`) {
+		t.Fatalf("data=%q missing status:completed", data)
+	}
+	// Server closes after the single frame; reading more returns EOF.
+	if _, err := rd.ReadByte(); err != io.EOF {
+		t.Fatalf("expected EOF after terminal frame, got %v", err)
+	}
+}
+
+func TestSSELiveRunStreamsAndCloses(t *testing.T) {
+	st := memory.New()
+	bus := events.NewBus(nil)
+	srv := httptest.NewServer(serverWithBus(st, bus).Handler())
+	t.Cleanup(srv.Close)
+
+	p := seedProject(t, st)
+	ru := &run.Run{ProjectID: p.ID, Phase: workflow.PhaseOSINT, Status: run.StatusRunning}
+	_ = st.Runs.Save(context.Background(), ru)
+
+	// Open the SSE stream and read events as another goroutine
+	// publishes them.
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + ru.ID + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rd := bufio.NewReader(resp.Body)
+
+	// Give the subscriber time to register.
+	deadline := time.Now().Add(time.Second)
+	for bus.SubscriberCount(ru.ID) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if bus.SubscriberCount(ru.ID) == 0 {
+		t.Fatal("subscriber never registered with the bus")
+	}
+
+	bus.Publish(events.Event{RunID: ru.ID, Kind: events.KindToolStarted, Payload: map[string]any{"tool": "fixture"}})
+	bus.Publish(events.Event{RunID: ru.ID, Kind: events.KindRunFinished, Payload: map[string]any{"status": "completed"}})
+
+	ev1, _ := readSSEFrame(t, rd)
+	if ev1 != events.KindToolStarted {
+		t.Fatalf("first event=%q, want tool.started", ev1)
+	}
+	ev2, _ := readSSEFrame(t, rd)
+	if ev2 != events.KindRunFinished {
+		t.Fatalf("second event=%q, want run.finished", ev2)
+	}
+	// Server closes after run.finished.
+	if _, err := rd.ReadByte(); err != io.EOF {
+		t.Fatalf("expected EOF after run.finished, got %v", err)
+	}
+}
+
+func TestSSEMissingBusReturns501(t *testing.T) {
+	st := memory.New()
+	srv := httptest.NewServer(New(st.Projects, st.Scopes, st.Runs, st.Audit).Handler())
+	t.Cleanup(srv.Close)
+	p := seedProject(t, st)
+	ru := &run.Run{ProjectID: p.ID, Phase: workflow.PhaseOSINT, Status: run.StatusRunning}
+	_ = st.Runs.Save(context.Background(), ru)
+	resp, err := http.Get(srv.URL + "/api/v1/runs/" + ru.ID + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status=%d, want 501", resp.StatusCode)
+	}
+}
+
+func TestSSEMissingRunIs404(t *testing.T) {
+	st := memory.New()
+	bus := events.NewBus(nil)
+	srv := httptest.NewServer(serverWithBus(st, bus).Handler())
+	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/api/v1/runs/ghost/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", resp.StatusCode)
+	}
+}
+
+// serverWithBus is a small helper that mirrors newTestServer but
+// includes the bus wiring. Tests use this when they need /events.
+func serverWithBus(st *memory.Store, bus *events.Bus) *Server {
+	s := New(st.Projects, st.Scopes, st.Runs, st.Audit)
+	s.Entities = st.Entities
+	s.Findings = st.Findings
+	s.Bus = bus
+	// Snappy keepalive so tests don't pay the 15s production cadence.
+	s.SSEKeepalive = 50 * time.Millisecond
+	return s
 }
 
 func TestAuditLogsEndpointReturnsNewestFirst(t *testing.T) {

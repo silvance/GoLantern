@@ -26,6 +26,7 @@ import (
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/entity"
+	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/report"
@@ -47,7 +48,14 @@ type Server struct {
 	// either is nil, GET /report returns 501.
 	Entities entity.Repository
 	Findings finding.Repository
-	Logger   *slog.Logger
+	// Bus is optional. When set, GET /runs/{id}/events streams
+	// Server-Sent Events; nil makes that endpoint return 501.
+	Bus *events.Bus
+	// SSEKeepalive is how often the events endpoint emits a comment
+	// frame to keep idle connections open. Defaults to 15s. Tests
+	// override this to keep the suite fast.
+	SSEKeepalive time.Duration
+	Logger       *slog.Logger
 
 	// Enqueue is the run-dispatch hook. When nil, POST /runs with a
 	// non-empty tools list returns 501 (Phase 4 behaviour). When set
@@ -106,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/projects/{id}/runs", s.handleCreateRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/tool-executions", s.handleListToolExecutions)
+	mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleRunEvents)
 	return mux
 }
 
@@ -790,6 +799,98 @@ func (s *Server) handleListToolExecutions(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRunEvents implements GET /api/v1/runs/{id}/events as a
+// Server-Sent Events stream. Subscribers see tool.started, entity.*,
+// relation.*, evidence.*, finding.*, tool.finished, and run.finished;
+// the stream closes after run.finished so clients can drain cleanly.
+//
+// If the run is already terminal when the connection opens, we emit a
+// single synthetic run.finished frame and close — callers should then
+// fall back to GET /runs/{id} for the snapshot.
+//
+// Returns 501 when the bus isn't wired into this server; the SPA falls
+// back to polling.
+func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
+	if s.Bus == nil {
+		writeJSON(w, http.StatusNotImplemented, errorBody(
+			"event stream not configured on this server"))
+		return
+	}
+	runID := r.PathValue("id")
+	ru, err := s.Runs.Get(r.Context(), runID)
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// net/http's default ResponseWriter supports Flusher; this is
+		// a safety belt for unusual wrappers.
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering when proxied
+	w.WriteHeader(http.StatusOK)
+
+	// Terminal-already short-circuit: emit one synthetic frame and
+	// close, mirroring Python's behaviour.
+	if ru.Status.IsTerminal() {
+		payload, _ := json.Marshal(map[string]any{
+			"phase":  string(ru.Phase),
+			"status": string(ru.Status),
+		})
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", events.KindRunFinished, payload)
+		flusher.Flush()
+		return
+	}
+
+	ch := s.Bus.Subscribe(runID)
+	defer s.Bus.Unsubscribe(runID, ch)
+
+	// Keepalive interval — same 15s the Python implementation uses
+	// in production. Tests override via Server.SSEKeepalive to keep
+	// the suite snappy. Browsers and proxies close idle connections;
+	// a comment frame every interval keeps the channel open during
+	// quiet stretches.
+	keepalive := s.SSEKeepalive
+	if keepalive <= 0 {
+		keepalive = 15 * time.Second
+	}
+	ticker := time.NewTicker(keepalive)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case ev, open := <-ch:
+			if !open {
+				return
+			}
+			payload, err := json.Marshal(ev)
+			if err != nil {
+				s.Logger.WarnContext(r.Context(), "sse: encode event failed",
+					slog.String("run_id", runID), slog.Any("err", err))
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, payload)
+			flusher.Flush()
+			if ev.Kind == events.KindRunFinished {
+				return
+			}
+		case <-ticker.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			// Client disconnected.
+			return
+		}
+	}
 }
 
 // ----- helpers ---------------------------------------------------------

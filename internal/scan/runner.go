@@ -11,6 +11,7 @@ import (
 
 	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/entity"
+	"github.com/silvance/golantern/internal/events"
 	"github.com/silvance/golantern/internal/fact"
 	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/run"
@@ -29,6 +30,7 @@ type Runner struct {
 	deps   Deps
 	logger *slog.Logger
 	audits audit.Repository // optional
+	bus    *events.Bus      // optional; nil disables event publishing
 }
 
 func NewRunner(deps Deps, logger *slog.Logger, audits audit.Repository) (*Runner, error) {
@@ -40,6 +42,11 @@ func NewRunner(deps Deps, logger *slog.Logger, audits audit.Repository) (*Runner
 	}
 	return &Runner{deps: deps, logger: logger, audits: audits}, nil
 }
+
+// SetBus wires an event bus through which the runner publishes
+// tool.started, entity.emitted, etc. nil-safe; existing callers that
+// don't care about SSE pass nothing.
+func (r *Runner) SetBus(bus *events.Bus) { r.bus = bus }
 
 // Execute runs collector under runID for projectID with the given
 // parameters. Returns the resulting *run.ToolExecution (already
@@ -96,6 +103,11 @@ func (r *Runner) Execute(
 	r.audit(ctx, projectID, "collector.start", meta.Name, map[string]any{
 		"parameters": parameters,
 		"phase":      string(meta.Phase),
+	})
+	r.publish(runID, events.KindToolStarted, map[string]any{
+		"tool":              meta.Name,
+		"tool_execution_id": tx.ID,
+		"phase":             string(meta.Phase),
 	})
 
 	// Build the persisting context that the collector emits into.
@@ -155,7 +167,23 @@ func (r *Runner) Execute(
 		"evidence_emitted": tx.EvidenceEmitted,
 		"findings_emitted": tx.FindingsEmitted,
 	})
+	r.publish(runID, events.KindToolFinished, map[string]any{
+		"tool":              meta.Name,
+		"tool_execution_id": tx.ID,
+		"status":            string(tx.Status),
+		"entities_emitted":  tx.EntitiesEmitted,
+		"evidence_emitted":  tx.EvidenceEmitted,
+		"findings_emitted":  tx.FindingsEmitted,
+	})
 	return tx, nil
+}
+
+// publish is the runner's nil-safe wrapper around bus.Publish.
+func (r *Runner) publish(runID, kind string, payload map[string]any) {
+	if r.bus == nil {
+		return
+	}
+	r.bus.Publish(events.Event{RunID: runID, Kind: kind, Payload: payload})
 }
 
 // runWithRecovery runs the collector, converting panics into errors so
@@ -330,6 +358,12 @@ func (p *persistingContext) EmitEntity(f fact.EntityFact) (string, error) {
 	}
 	p.tx.EntitiesEmitted++
 	p.tx.EvidenceEmitted++
+	p.runner.publish(p.runID, events.KindEntityEmitted, map[string]any{
+		"tool":      p.meta.Name,
+		"entity_id": id,
+		"kind":      string(f.Kind),
+		"value":     f.Value,
+	})
 	return id, nil
 }
 
@@ -342,13 +376,24 @@ func (p *persistingContext) EmitRelation(f fact.RelationFact) error {
 	if err != nil {
 		return err
 	}
-	return p.runner.deps.Entities.CreateRelation(p.baseCtx, &entity.Relation{
+	if err := p.runner.deps.Entities.CreateRelation(p.baseCtx, &entity.Relation{
 		ProjectID:  p.projectID,
 		SrcID:      srcID,
 		DstID:      dstID,
 		Kind:       f.Kind,
 		Attributes: f.Attributes,
+	}); err != nil {
+		return err
+	}
+	p.runner.publish(p.runID, events.KindRelationEmitted, map[string]any{
+		"tool":      p.meta.Name,
+		"kind":      string(f.Kind),
+		"src_kind":  string(f.Src.Kind),
+		"src_value": f.Src.Value,
+		"dst_kind":  string(f.Dst.Kind),
+		"dst_value": f.Dst.Value,
 	})
+	return nil
 }
 
 func (p *persistingContext) EmitEvidence(f fact.EvidenceFact) error {
@@ -384,6 +429,13 @@ func (p *persistingContext) EmitEvidence(f fact.EvidenceFact) error {
 		return err
 	}
 	p.tx.EvidenceEmitted++
+	p.runner.publish(p.runID, events.KindEvidenceEmitted, map[string]any{
+		"tool":            p.meta.Name,
+		"source_tool":     sourceTool,
+		"source_category": string(f.SourceCategory),
+		"entity_id":       entityID,
+		"finding_id":      findingID,
+	})
 	return nil
 }
 
@@ -422,6 +474,13 @@ func (p *persistingContext) EmitFinding(f fact.FindingFact) (string, error) {
 		p.tx.EvidenceEmitted++
 	}
 	p.tx.FindingsEmitted++
+	p.runner.publish(p.runID, events.KindFindingEmitted, map[string]any{
+		"tool":       p.meta.Name,
+		"finding_id": fObj.ID,
+		"title":      f.Title,
+		"severity":   string(f.Severity),
+		"category":   f.Category,
+	})
 	return fObj.ID, nil
 }
 
