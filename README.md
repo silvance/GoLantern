@@ -91,6 +91,14 @@ GOOS=darwin GOARCH=arm64 go build -o golantern-mac    ./cmd/golantern
 No CGO means cross-compilation works out of the box for every
 platform Go supports.
 
+### External collector binaries
+
+GoLantern itself is one binary, but most collectors shell out to
+external tools (`nmap`, `nuclei`, `nikto`, …). See
+[docs/INSTALL_TOOLS.md](docs/INSTALL_TOOLS.md) for Fedora install
+commands. After installing, open `/doctor` in the SPA to verify
+each tool is on `$PATH`.
+
 ---
 
 ## Running
