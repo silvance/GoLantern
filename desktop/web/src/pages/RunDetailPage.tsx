@@ -6,19 +6,24 @@ import type { ToolInvocation } from "../api/types";
 import {
   Button,
   Card,
+  CopyButton,
   Empty,
   ErrorMessage,
   PageTitle,
+  RelativeTime,
   SectionTitle,
   Spinner,
   StatusBadge,
 } from "../components/ui";
 import { useRunEvents } from "../hooks/useRunEvents";
+import { useToast } from "../components/Toast";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 export default function RunDetailPage() {
   const { projectID = "", runID = "" } = useParams();
   const qc = useQueryClient();
   const nav = useNavigate();
+  const toast = useToast();
   const runQ = useQuery({
     queryKey: ["run", runID],
     queryFn: () => api.getRun(runID),
@@ -62,7 +67,9 @@ export default function RunDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["run", runID] });
       qc.invalidateQueries({ queryKey: ["runs", projectID] });
+      toast("info", "Run cancelled — in-flight collectors will finish");
     },
+    onError: (e: Error) => toast("error", `Cancel failed: ${e.message}`),
   });
 
   // Re-run: POST a new run with the same phase + tool list this run
@@ -82,8 +89,10 @@ export default function RunDetailPage() {
     },
     onSuccess: (newRun) => {
       qc.invalidateQueries({ queryKey: ["runs", projectID] });
+      toast("success", "New run started");
       nav(`/projects/${projectID}/runs/${newRun.id}`);
     },
+    onError: (e: Error) => toast("error", `Could not re-run: ${e.message}`),
   });
 
   // When a tool finishes (or emits anything report-shaped), invalidate
@@ -108,6 +117,10 @@ export default function RunDetailPage() {
       qc.invalidateQueries({ queryKey: ["runs", projectID] });
     }
   }, [lastEvent, qc, projectID, runID]);
+
+  useDocumentTitle(
+    runQ.data ? runQ.data.label || `Run ${runQ.data.id.slice(0, 8)}` : null,
+  );
 
   if (runQ.isLoading) return <Spinner />;
   if (runQ.isError) return <ErrorMessage>{(runQ.error as Error).message}</ErrorMessage>;
@@ -173,9 +186,14 @@ export default function RunDetailPage() {
           <div className="text-slate-500 dark:text-slate-400">Phase</div>
           <div>{run.phase}</div>
           <div className="text-slate-500 dark:text-slate-400">Started</div>
-          <div>{run.started_at ? new Date(run.started_at).toLocaleString() : "—"}</div>
+          <div><RelativeTime iso={run.started_at} /></div>
           <div className="text-slate-500 dark:text-slate-400">Finished</div>
-          <div>{run.finished_at ? new Date(run.finished_at).toLocaleString() : "—"}</div>
+          <div><RelativeTime iso={run.finished_at} /></div>
+          <div className="text-slate-500 dark:text-slate-400">Run ID</div>
+          <div className="flex items-center gap-1.5">
+            <code className="text-xs">{run.id}</code>
+            <CopyButton value={run.id} label="Copy run ID" />
+          </div>
           {run.error_summary && (
             <>
               <div className="text-slate-500 dark:text-slate-400">Error</div>
@@ -207,7 +225,10 @@ export default function RunDetailPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {txsQ.data.map((tx) => (
-                <tr key={tx.id}>
+                <tr
+                  key={tx.id}
+                  className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                >
                   <td className="px-4 py-2 font-mono text-xs">{tx.tool}</td>
                   <td className="px-4 py-2"><StatusBadge value={tx.status} /></td>
                   <td className="px-4 py-2">{tx.entities_emitted}</td>

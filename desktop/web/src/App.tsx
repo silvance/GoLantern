@@ -7,6 +7,7 @@ import DoctorPage from "./pages/DoctorPage";
 import AboutPage from "./pages/AboutPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { LanternMark } from "./components/ui";
 
 export default function App() {
   return (
@@ -37,7 +38,11 @@ function Header() {
   return (
     <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-6">
-        <Link to="/" className="font-semibold text-lg">
+        <Link
+          to="/"
+          className="font-semibold text-lg flex items-center gap-2 tracking-tight"
+        >
+          <LanternMark />
           GoLantern
         </Link>
         <nav className="flex gap-4 text-sm flex-1">

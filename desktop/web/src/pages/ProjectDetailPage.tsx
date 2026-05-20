@@ -8,6 +8,8 @@ import {
   PageTitle,
   Spinner,
 } from "../components/ui";
+import { useToast } from "../components/Toast";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import OverviewTab from "./tabs/OverviewTab";
 import ScopeTab from "./tabs/ScopeTab";
 import RunsTab from "./tabs/RunsTab";
@@ -44,6 +46,7 @@ export default function ProjectDetailPage() {
   const { projectID = "" } = useParams();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab: TabKey =
@@ -73,9 +76,13 @@ export default function ProjectDetailPage() {
     mutationFn: () => api.deleteProject(projectID),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["projects"] });
+      toast("success", "Project deleted");
       nav("/");
     },
+    onError: (e: Error) => toast("error", `Delete failed: ${e.message}`),
   });
+
+  useDocumentTitle(q.data?.name);
 
   if (q.isLoading) return <Spinner />;
   if (q.isError)

@@ -9,12 +9,15 @@ import {
   Empty,
   ErrorMessage,
   Input,
+  PlayIcon,
+  RelativeTime,
   SectionTitle,
   Select,
   Spinner,
   StatusBadge,
 } from "../../components/ui";
 import { ToolPicker } from "../../components/ToolPicker";
+import { useToast } from "../../components/Toast";
 
 const PHASES: Phase[] = [
   "scope",
@@ -30,6 +33,7 @@ const PHASES: Phase[] = [
 export default function RunsTab({ projectID }: { projectID: string }) {
   const qc = useQueryClient();
   const nav = useNavigate();
+  const toast = useToast();
   const runsQ = useQuery({
     queryKey: ["runs", projectID],
     queryFn: () => api.listRuns(projectID),
@@ -72,15 +76,23 @@ export default function RunsTab({ projectID }: { projectID: string }) {
       }),
     onSuccess: (run) => {
       qc.invalidateQueries({ queryKey: ["runs", projectID] });
+      const dispatched = tools.length;
       setLabel("");
       setTools([]);
       // If the run dispatched any collectors, jump straight to the
       // run detail page so the operator can watch the SSE feed.
       // Metadata-only runs (no tools) stay on the list.
-      if (tools.length > 0) {
+      if (dispatched > 0) {
+        toast(
+          "success",
+          `Started run — ${dispatched} collector${dispatched === 1 ? "" : "s"} dispatching`,
+        );
         nav(`/projects/${projectID}/runs/${run.id}`);
+      } else {
+        toast("info", "Metadata-only run recorded");
       }
     },
+    onError: (e: Error) => toast("error", `Could not start run: ${e.message}`),
   });
 
   function onAdd(e: FormEvent) {
@@ -175,7 +187,12 @@ export default function RunsTab({ projectID }: { projectID: string }) {
         </SectionTitle>
         {runsQ.isLoading && <Spinner />}
         {runsQ.isError && <ErrorMessage>{(runsQ.error as Error).message}</ErrorMessage>}
-        {runsQ.data && runsQ.data.length === 0 && <Empty>No runs yet.</Empty>}
+        {runsQ.data && runsQ.data.length === 0 && (
+          <Empty icon={<PlayIcon size={36} />}>
+            No runs yet. Pick a phase above, choose collectors, and start
+            your first run — events will stream live to a new page.
+          </Empty>
+        )}
         {runsQ.data && runsQ.data.length > 0 && filteredRuns.length === 0 && (
           <Empty>No runs match this status filter.</Empty>
         )}
@@ -192,7 +209,11 @@ export default function RunsTab({ projectID }: { projectID: string }) {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredRuns.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer"
+                    onClick={() => nav(`/projects/${projectID}/runs/${r.id}`)}
+                  >
                     <td className="px-4 py-2">{r.phase}</td>
                     <td className="px-4 py-2">
                       <StatusBadge value={r.status} />
@@ -200,13 +221,14 @@ export default function RunsTab({ projectID }: { projectID: string }) {
                     <td className="px-4 py-2">
                       <Link
                         to={`/projects/${projectID}/runs/${r.id}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {r.label || r.id.slice(0, 8)}
                       </Link>
                     </td>
                     <td className="px-4 py-2 text-slate-500 dark:text-slate-400 text-xs">
-                      {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
+                      <RelativeTime iso={r.started_at} />
                     </td>
                   </tr>
                 ))}

@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Button, ErrorMessage, Input, PageTitle, Select, Textarea } from "../components/ui";
+import { useToast } from "../components/Toast";
 import type { Mode, ScopeKind } from "../api/types";
 
 export default function NewProjectPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
   const [name, setName] = useState("");
   const [organization, setOrganization] = useState("");
   const [description, setDescription] = useState("");
@@ -25,8 +27,10 @@ export default function NewProjectPage() {
       }),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["projects"] });
+      toast("success", `Project "${p.name}" created`);
       nav(`/projects/${p.id}`);
     },
+    onError: (e: Error) => toast("error", `Could not create: ${e.message}`),
   });
 
   function onSubmit(e: FormEvent) {

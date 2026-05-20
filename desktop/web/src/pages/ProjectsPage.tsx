@@ -7,6 +7,7 @@ import {
   Card,
   Empty,
   ErrorMessage,
+  FolderIcon,
   Input,
   PageTitle,
   Select,
@@ -77,7 +78,17 @@ export default function ProjectsPage() {
       {q.isLoading && <Spinner />}
       {q.isError && <ErrorMessage>{(q.error as Error).message}</ErrorMessage>}
       {q.data && q.data.length === 0 && (
-        <Empty>No projects yet. Create one to get started.</Empty>
+        <Empty
+          icon={<FolderIcon size={40} />}
+          action={
+            <Link to="/projects/new">
+              <Button>Create your first project</Button>
+            </Link>
+          }
+        >
+          No projects yet. Projects group scope, runs, findings, and reports
+          for one engagement.
+        </Empty>
       )}
 
       {q.data && q.data.length > 0 && (

@@ -12,9 +12,11 @@ import {
   Select,
   Spinner,
 } from "../../components/ui";
+import { useToast } from "../../components/Toast";
 
 export default function ScopeTab({ projectID }: { projectID: string }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const rulesQ = useQuery({
     queryKey: ["scope-rules", projectID],
     queryFn: () => api.listScopeRules(projectID),
@@ -29,15 +31,20 @@ export default function ScopeTab({ projectID }: { projectID: string }) {
       api.createScopeRule(projectID, { pattern, kind, note: note || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["scope-rules", projectID] });
+      toast("success", "Scope rule added");
       setPattern("");
       setNote("");
     },
+    onError: (e: Error) => toast("error", `Could not add rule: ${e.message}`),
   });
 
   const del = useMutation({
     mutationFn: (ruleID: string) => api.deleteScopeRule(projectID, ruleID),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["scope-rules", projectID] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["scope-rules", projectID] });
+      toast("success", "Scope rule deleted");
+    },
+    onError: (e: Error) => toast("error", `Delete failed: ${e.message}`),
   });
 
   function onAdd(e: FormEvent) {
@@ -67,7 +74,10 @@ export default function ScopeTab({ projectID }: { projectID: string }) {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {rulesQ.data.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                  >
                     <td className="px-4 py-2 font-mono text-xs">{r.pattern}</td>
                     <td className="px-4 py-2">{r.kind}</td>
                     <td className="px-4 py-2 text-slate-500 dark:text-slate-400">
