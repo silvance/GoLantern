@@ -40,8 +40,10 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/gowitness"
 	"github.com/silvance/golantern/internal/scan/collectors/hibp"
 	"github.com/silvance/golantern/internal/scan/collectors/historicalurls"
+	"github.com/silvance/golantern/internal/scan/collectors/holehe"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
 	"github.com/silvance/golantern/internal/scan/collectors/katana"
+	"github.com/silvance/golantern/internal/scan/collectors/maigret"
 	"github.com/silvance/golantern/internal/scan/collectors/naabu"
 	"github.com/silvance/golantern/internal/scan/collectors/nikto"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
@@ -140,8 +142,10 @@ func cmdServe(args []string) error {
 	reg.Register(gowitness.Name, gowitness.New)
 	reg.Register(hibp.Name, hibp.New)
 	reg.Register(historicalurls.Name, historicalurls.New)
+	reg.Register(holehe.Name, holehe.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
 	reg.Register(katana.Name, katana.New)
+	reg.Register(maigret.Name, maigret.New)
 	reg.Register(naabu.Name, naabu.New)
 	reg.Register(nikto.Name, nikto.New)
 	reg.Register(nmap.Name, nmap.New)

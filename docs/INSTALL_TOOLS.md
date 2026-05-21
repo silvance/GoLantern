@@ -91,6 +91,8 @@ sudo dnf install pipx
 pipx ensurepath
 pipx install theHarvester
 pipx install sherlock-project
+pipx install maigret
+pipx install holehe
 pipx install smbmap
 ```
 
@@ -101,6 +103,8 @@ on `$PATH`.
 |---|---|---|
 | `theHarvester` | `theHarvester` | `theharvester` collector |
 | `sherlock` | `sherlock-project` | `sherlock` collector |
+| `maigret` | `maigret` | `maigret` collector |
+| `holehe` | `holehe` | `holehe` collector |
 | `smbmap` | `smbmap` | `smbmap` collector |
 
 ## Ruby gem — wpscan

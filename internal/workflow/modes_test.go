@@ -31,7 +31,7 @@ func TestPresetForUnknownPanics(t *testing.T) {
 
 func TestRecommendedToolsAssessment(t *testing.T) {
 	got := RecommendedToolsForPhase(project.ModeAssessment, PhaseOSINT)
-	want := []string{"crtsh", "theharvester"}
+	want := []string{"crtsh", "theharvester", "sherlock"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("assessment OSINT tools = %v, want %v", got, want)
 	}

@@ -28,11 +28,11 @@ var presets = map[project.Mode]ModePreset{
 	project.ModeAssessment: {
 		SuggestedScopeKind: scope.KindLightActive,
 		RecommendedTools: map[Phase][]string{
-			PhaseOSINT:          {"crtsh", "theharvester"},
+			PhaseOSINT:          {"crtsh", "theharvester", "sherlock"},
 			PhaseAssetDiscovery: {"crtsh", "subfinder", "amass", "dnsx"},
 			PhaseValidation:     {"httpx_probe", "gowitness", "dnsx", "naabu", "msf_smb_version", "msf_ssh_version"},
 			PhaseExposure:       {"nuclei", "testssl", "wpscan", "msf_smb_enumshares", "msf_ftp_anonymous"},
-			PhaseEnrichment:     {"tlsx", "cloud_bucket", "shodan", "censys", "hibp"},
+			PhaseEnrichment:     {"tlsx", "cloud_bucket", "holehe", "shodan", "censys", "hibp"},
 		},
 		ReportTemplate: "standard",
 	},
@@ -42,11 +42,11 @@ var presets = map[project.Mode]ModePreset{
 		// Scope rules still gate per-target.
 		SuggestedScopeKind: scope.KindFullActive,
 		RecommendedTools: map[Phase][]string{
-			PhaseOSINT:          {"crtsh", "github_repos", "theharvester"},
+			PhaseOSINT:          {"crtsh", "github_repos", "theharvester", "sherlock", "maigret"},
 			PhaseAssetDiscovery: {"crtsh", "subfinder", "amass", "dnsx", "historical_urls"},
 			PhaseValidation:     {"httpx_probe", "gowitness", "naabu", "msf_smb_version", "msf_ssh_version", "msf_rdp_scanner"},
 			PhaseExposure:       {"nuclei", "katana", "testssl", "wpscan", "msf_smb_enumshares", "msf_ftp_anonymous", "msf_snmp_login", "msf_vnc_none_auth"},
-			PhaseEnrichment:     {"tlsx", "cloud_bucket", "trufflehog", "shodan"},
+			PhaseEnrichment:     {"tlsx", "cloud_bucket", "holehe", "trufflehog", "shodan"},
 		},
 		ReportTemplate: "bug_bounty",
 	},

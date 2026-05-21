@@ -4,9 +4,10 @@
 //
 // Ported from lantern/tools/sherlock.py.
 //
-// We deliberately port sherlock as the canonical username-enum
-// wrapper and skip maigret / whatsmyname — they target the same
-// problem with the same shape (username in, profile URLs out).
+// Pair with the maigret collector for depth: sherlock is the fast
+// first pass (~400 sites), maigret is the deep pass (~3000 sites
+// with profile metadata). They emit compatible URL entities so
+// running both on the same handle dedups automatically.
 package sherlock
 
 import (

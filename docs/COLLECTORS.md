@@ -1,19 +1,20 @@
 # Collectors
 
-GoLantern ships 27 collectors covering the LCVA workflow phases:
+GoLantern ships 29 collectors covering the LCVA workflow phases:
 
 | Phase | Collectors |
 |---|---|
-| OSINT | `theharvester`, `sherlock`, `fixture` |
+| OSINT | `theharvester`, `sherlock`, `maigret`, `fixture` |
 | Asset Discovery | `crtsh`, `subfinder`, `amass`, `historical_urls`, `github_repos` |
 | Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `naabu`, `ffuf`, `smbmap` |
 | Exposure | `nuclei`, `katana`, `nikto`, `testssl`, `wpscan`, `email_security` |
-| Enrichment | `tlsx`, `cloud_bucket`, `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
+| Enrichment | `tlsx`, `cloud_bucket`, `holehe`, `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
 
-21 of these were ported from the Python lantern codebase; 6 are new
+21 of these were ported from the Python lantern codebase; 8 are new
 additions that close gaps in the Python set (modern web crawling,
 fast port discovery, cross-source subdomain correlation, TLS-cert
-SAN extraction, WordPress audit, and open cloud-bucket discovery).
+SAN extraction, WordPress audit, open cloud-bucket discovery,
+deep username enumeration, and email-driven account discovery).
 
 ## How collectors are organized
 
@@ -48,7 +49,7 @@ clean Go equivalent.
 | `kerbrute` | Kerberos pre-auth username enumeration. | `smbmap` covers the SMB-side enum; Kerberos-specific brute is a niche we'd add back when a real engagement needs it. |
 | `enum4linux_ng` | SMB / NetBIOS enumeration. Heavy text-parsing surface that overlaps with `smbmap`. | `smbmap` (one of its design goals was being a modern enum4linux). |
 | `netexec` | Multi-protocol enum/auth probe. Largest scope of any single collector — would justify its own dedicated package and CLI matrix. | `smbmap` for the SMB slice; the others (LDAP/RDP/SSH probes) are out of GoLantern's current scope. |
-| `maigret`, `whatsmyname` | Username enumeration. Same problem as `sherlock` with a different site list. | `sherlock`. |
+| `whatsmyname`, `knowem`, `blackbird`, `socialscan` | Username enumeration. Same shape as `sherlock`/`maigret`; whatsmyname is primarily a site-list database that sherlock already imports, knowem is a SaaS not a CLI. | `sherlock` (fast) + `maigret` (deep) cover the surface. |
 
 ### Skipped — needs infrastructure that isn't ported
 
