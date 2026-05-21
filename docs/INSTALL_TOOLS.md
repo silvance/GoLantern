@@ -16,13 +16,17 @@ GoLantern looks for is on `$PATH`.
 These are one-command installs.
 
 ```sh
-sudo dnf install nmap perl-Image-ExifTool
+sudo dnf install nmap perl-Image-ExifTool whois net-snmp-utils whatweb exploitdb
 ```
 
 | Tool | Used by |
 |---|---|
 | `nmap` | `nmap` collector |
 | `perl-Image-ExifTool` (provides `exiftool`) | `exiftool` collector |
+| `whois` | `whois` collector |
+| `net-snmp-utils` (provides `snmpwalk`) | `snmpwalk` collector |
+| `whatweb` | `whatweb` collector (may require EPEL on RHEL) |
+| `exploitdb` (provides `searchsploit`) | `searchsploit` collector |
 
 ## Go-based tools — install with `go install`
 
@@ -94,6 +98,8 @@ pipx install sherlock-project
 pipx install maigret
 pipx install holehe
 pipx install smbmap
+pipx install dnsrecon
+pipx install ssh-audit
 ```
 
 After `pipx ensurepath` you may need a new shell so `~/.local/bin` is
@@ -106,6 +112,8 @@ on `$PATH`.
 | `maigret` | `maigret` | `maigret` collector |
 | `holehe` | `holehe` | `holehe` collector |
 | `smbmap` | `smbmap` | `smbmap` collector |
+| `dnsrecon` | `dnsrecon` | `dnsrecon` collector |
+| `ssh-audit` | `ssh-audit` | `ssh_audit` collector |
 
 ## Ruby gem — wpscan
 
@@ -144,6 +152,18 @@ sudo dnf install bind-utils openssl
 git clone --depth 1 https://github.com/drwetter/testssl.sh.git ~/tools/testssl
 sudo ln -s ~/tools/testssl/testssl.sh /usr/local/bin/testssl.sh
 testssl.sh --version
+```
+
+### smtp-user-enum
+
+Fedora doesn't package smtp-user-enum; install the Perl script directly:
+
+```sh
+sudo dnf install perl perl-IO-Socket-SSL
+sudo curl -L -o /usr/local/bin/smtp-user-enum \
+    https://raw.githubusercontent.com/pentestmonkey/smtp-user-enum/master/smtp-user-enum.pl
+sudo chmod +x /usr/local/bin/smtp-user-enum
+smtp-user-enum -h
 ```
 
 ## Collectors with no binary dependency

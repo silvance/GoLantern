@@ -1,20 +1,23 @@
 # Collectors
 
-GoLantern ships 29 collectors covering the LCVA workflow phases:
+GoLantern ships 36 collectors covering the LCVA workflow phases:
 
 | Phase | Collectors |
 |---|---|
 | OSINT | `theharvester`, `sherlock`, `maigret`, `fixture` |
-| Asset Discovery | `crtsh`, `subfinder`, `amass`, `historical_urls`, `github_repos` |
-| Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `naabu`, `ffuf`, `smbmap` |
-| Exposure | `nuclei`, `katana`, `nikto`, `testssl`, `wpscan`, `email_security` |
-| Enrichment | `tlsx`, `cloud_bucket`, `holehe`, `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
+| Asset Discovery | `crtsh`, `subfinder`, `amass`, `dnsrecon`, `historical_urls`, `github_repos` |
+| Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `naabu`, `whatweb`, `snmpwalk`, `ffuf`, `smbmap` |
+| Exposure | `nuclei`, `katana`, `nikto`, `testssl`, `wpscan`, `ssh_audit`, `smtp_user_enum`, `email_security` |
+| Enrichment | `whois`, `tlsx`, `cloud_bucket`, `holehe`, `searchsploit`, `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
 
-21 of these were ported from the Python lantern codebase; 8 are new
-additions that close gaps in the Python set (modern web crawling,
-fast port discovery, cross-source subdomain correlation, TLS-cert
-SAN extraction, WordPress audit, open cloud-bucket discovery,
-deep username enumeration, and email-driven account discovery).
+21 of these were ported from the Python lantern codebase; 15 are new
+additions that close gaps in the Python set:
+
+- **Asset discovery:** `amass`, `dnsrecon` (broader source coverage + AXFR zone transfers)
+- **Validation:** `naabu` (fast port sweep), `whatweb` (rich tech fingerprint), `snmpwalk` (SNMP enumeration)
+- **Exposure:** `katana` (modern crawler), `wpscan`, `ssh_audit`, `smtp_user_enum`
+- **Enrichment:** `whois`, `tlsx`, `cloud_bucket`, `holehe`, `searchsploit` (offline ExploitDB lookup)
+- **OSINT:** `maigret` (deep pass paired with sherlock)
 
 ## How collectors are organized
 
