@@ -16,6 +16,7 @@ import RunsTab from "./tabs/RunsTab";
 import FindingsTab from "./tabs/FindingsTab";
 import EntitiesTab from "./tabs/EntitiesTab";
 import ArtifactsTab from "./tabs/ArtifactsTab";
+import IngestTab from "./tabs/IngestTab";
 import AssistantTab from "./tabs/AssistantTab";
 import AuditTab from "./tabs/AuditTab";
 
@@ -26,6 +27,7 @@ type TabKey =
   | "findings"
   | "entities"
   | "artifacts"
+  | "ingest"
   | "assistant"
   | "audit";
 
@@ -36,6 +38,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "findings", label: "Findings" },
   { key: "entities", label: "Entities" },
   { key: "artifacts", label: "Artifacts" },
+  { key: "ingest", label: "Ingest" },
   { key: "assistant", label: "Assistant" },
   { key: "audit", label: "Audit" },
 ];
@@ -150,6 +153,7 @@ export default function ProjectDetailPage() {
       {tab === "findings" && <FindingsTab projectID={projectID} />}
       {tab === "entities" && <EntitiesTab projectID={projectID} />}
       {tab === "artifacts" && <ArtifactsTab projectID={projectID} />}
+      {tab === "ingest" && <IngestTab projectID={projectID} />}
       {tab === "assistant" && <AssistantTab projectID={projectID} />}
       {tab === "audit" && <AuditTab projectID={projectID} />}
     </div>

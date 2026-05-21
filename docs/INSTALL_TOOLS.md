@@ -16,7 +16,7 @@ GoLantern looks for is on `$PATH`.
 These are one-command installs.
 
 ```sh
-sudo dnf install nmap perl-Image-ExifTool whois net-snmp-utils whatweb exploitdb
+sudo dnf install nmap perl-Image-ExifTool whois net-snmp-utils whatweb exploitdb john
 ```
 
 | Tool | Used by |
@@ -27,6 +27,7 @@ sudo dnf install nmap perl-Image-ExifTool whois net-snmp-utils whatweb exploitdb
 | `net-snmp-utils` (provides `snmpwalk`) | `snmpwalk` collector |
 | `whatweb` | `whatweb` collector (may require EPEL on RHEL) |
 | `exploitdb` (provides `searchsploit`) | `searchsploit` collector |
+| `john` | `john` collector (for `-jumbo` features build openwall/john from source) |
 
 ## Go-based tools — install with `go install`
 
@@ -100,6 +101,8 @@ pipx install holehe
 pipx install smbmap
 pipx install dnsrecon
 pipx install ssh-audit
+pipx install netexec
+pipx install enum4linux-ng
 ```
 
 After `pipx ensurepath` you may need a new shell so `~/.local/bin` is
@@ -114,6 +117,8 @@ on `$PATH`.
 | `smbmap` | `smbmap` | `smbmap` collector |
 | `dnsrecon` | `dnsrecon` | `dnsrecon` collector |
 | `ssh-audit` | `ssh-audit` | `ssh_audit` collector |
+| `netexec` | `netexec` | `netexec` collector |
+| `enum4linux-ng` | `enum4linux-ng` | `enum4linux_ng` collector |
 
 ## Ruby gem — wpscan
 

@@ -40,12 +40,15 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/githubrepos"
 	"github.com/silvance/golantern/internal/scan/collectors/gowitness"
 	"github.com/silvance/golantern/internal/scan/collectors/hibp"
+	"github.com/silvance/golantern/internal/scan/collectors/enum4linuxng"
 	"github.com/silvance/golantern/internal/scan/collectors/historicalurls"
 	"github.com/silvance/golantern/internal/scan/collectors/holehe"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
+	"github.com/silvance/golantern/internal/scan/collectors/john"
 	"github.com/silvance/golantern/internal/scan/collectors/katana"
 	"github.com/silvance/golantern/internal/scan/collectors/maigret"
 	"github.com/silvance/golantern/internal/scan/collectors/naabu"
+	"github.com/silvance/golantern/internal/scan/collectors/netexec"
 	"github.com/silvance/golantern/internal/scan/collectors/nikto"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
 	"github.com/silvance/golantern/internal/scan/collectors/nuclei"
@@ -64,6 +67,10 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/whatweb"
 	"github.com/silvance/golantern/internal/scan/collectors/whois"
 	"github.com/silvance/golantern/internal/scan/collectors/wpscan"
+
+	"github.com/silvance/golantern/internal/evidence"
+	"github.com/silvance/golantern/internal/evidence/parsers/linpeas"
+	"github.com/silvance/golantern/internal/evidence/parsers/winpeas"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
 	"github.com/silvance/golantern/internal/store/sqlite"
@@ -144,6 +151,7 @@ func cmdServe(args []string) error {
 	reg.Register(dnsrecon.Name, dnsrecon.New)
 	reg.Register(dnsx.Name, dnsx.New)
 	reg.Register(emailsec.Name, emailsec.New)
+	reg.Register(enum4linuxng.Name, enum4linuxng.New)
 	reg.Register(exiftool.Name, exiftool.New)
 	reg.Register(ffuf.Name, ffuf.New)
 	reg.Register(githubrepos.Name, githubrepos.New)
@@ -152,9 +160,11 @@ func cmdServe(args []string) error {
 	reg.Register(historicalurls.Name, historicalurls.New)
 	reg.Register(holehe.Name, holehe.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
+	reg.Register(john.Name, john.New)
 	reg.Register(katana.Name, katana.New)
 	reg.Register(maigret.Name, maigret.New)
 	reg.Register(naabu.Name, naabu.New)
+	reg.Register(netexec.Name, netexec.New)
 	reg.Register(nikto.Name, nikto.New)
 	reg.Register(nmap.Name, nmap.New)
 	reg.Register(nuclei.Name, nuclei.New)
@@ -262,6 +272,14 @@ func cmdServe(args []string) error {
 	srv.Bus = bus
 	srv.Assistant = assistantProvider
 	srv.WebUI = desktop.Handler()
+
+	// Evidence-ingest parsers — LinPEAS / WinPEAS-style post-foothold
+	// output that the operator pastes via the SPA after running a
+	// privesc audit on the compromised target.
+	evReg := evidence.NewRegistry()
+	evReg.Register(linpeas.New())
+	evReg.Register(winpeas.New())
+	srv.EvidenceParsers = evReg
 	srv.Enqueue = func(ctx context.Context, runID string, invocations []api.ToolInvocation) error {
 		jobInvs := make([]jobs.Invocation, len(invocations))
 		for i, inv := range invocations {

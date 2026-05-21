@@ -32,6 +32,7 @@ import (
 	"github.com/silvance/golantern/internal/engine"
 	"github.com/silvance/golantern/internal/entity"
 	"github.com/silvance/golantern/internal/events"
+	"github.com/silvance/golantern/internal/evidence"
 	"github.com/silvance/golantern/internal/finding"
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/report"
@@ -66,6 +67,10 @@ type Server struct {
 	// Bus is optional. When set, GET /runs/{id}/events streams
 	// Server-Sent Events; nil makes that endpoint return 501.
 	Bus *events.Bus
+	// EvidenceParsers is the registry of post-foothold evidence
+	// parsers (LinPEAS, WinPEAS, …). When nil, the ingest endpoints
+	// return 501. Wired by cmd/golantern.
+	EvidenceParsers *evidence.Registry
 	// SSEKeepalive is how often the events endpoint emits a comment
 	// frame to keep idle connections open. Defaults to 15s. Tests
 	// override this to keep the suite fast.
@@ -148,6 +153,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/collectors", s.handleListCollectors)
 	mux.HandleFunc("GET /api/v1/projects/{id}/recommended-tools", s.handleRecommendedTools)
 	mux.HandleFunc("GET /api/v1/doctor", s.handleDoctor)
+	mux.HandleFunc("GET /api/v1/evidence/parsers", s.handleListEvidenceParsers)
+	mux.HandleFunc("POST /api/v1/projects/{id}/evidence/ingest", s.handleEvidenceIngest)
 	// Static SPA fallback. Anything not matched by the explicit /api
 	// or /healthz patterns above falls through to the embedded
 	// desktop/dist bundle. ServeMux's wildcard "/" pattern is the

@@ -12,6 +12,9 @@ import type {
   CreateRunRequest,
   DoctorEntry,
   Entity,
+  EvidenceIngestRequest,
+  EvidenceIngestResponse,
+  EvidenceParser,
   Finding,
   Phase,
   Project,
@@ -181,6 +184,15 @@ export const api = {
       `/api/v1/projects/${projectID}/recommended-tools?phase=${encodeURIComponent(phase)}`,
     ),
   doctor: () => request<DoctorEntry[]>("/api/v1/doctor"),
+
+  // ----- Evidence ingest -----------------------------------------------
+  listEvidenceParsers: () =>
+    request<EvidenceParser[]>("/api/v1/evidence/parsers"),
+  ingestEvidence: (projectID: string, body: EvidenceIngestRequest) =>
+    request<EvidenceIngestResponse>(
+      `/api/v1/projects/${projectID}/evidence/ingest`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 
   // ----- Assistant ------------------------------------------------------
   ask: (projectID: string, question: string, mode?: string) =>

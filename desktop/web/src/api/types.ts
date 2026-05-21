@@ -196,3 +196,23 @@ export interface DoctorEntry {
   install_hint?: string;
 }
 
+export interface EvidenceParser {
+  name: string;
+  description: string;
+}
+
+export interface EvidenceIngestRequest {
+  tool: string;
+  content: string;
+  target?: string;
+  notes?: string;
+}
+
+export interface EvidenceIngestResponse {
+  tool: string;
+  target?: string;
+  entities_emitted: number;
+  findings_emitted: number;
+  evidence_emitted: number;
+}
+

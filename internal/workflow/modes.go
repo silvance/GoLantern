@@ -57,8 +57,8 @@ var presets = map[project.Mode]ModePreset{
 		// box has one IP and no DNS / breach-data context.
 		SuggestedScopeKind: scope.KindFullActive,
 		RecommendedTools: map[Phase][]string{
-			PhaseValidation: {"nmap", "naabu", "httpx_probe", "gowitness", "whatweb", "snmpwalk"},
-			PhaseExposure:   {"feroxbuster", "ffuf", "gobuster", "nikto", "nuclei", "katana", "wpscan", "ssh_audit", "smbmap", "enum4linux_ng", "netexec", "smtp_user_enum"},
+			PhaseValidation: {"nmap", "naabu", "httpx_probe", "gowitness", "whatweb", "snmpwalk", "netexec", "enum4linux_ng"},
+			PhaseExposure:   {"feroxbuster", "ffuf", "gobuster", "nikto", "nuclei", "katana", "wpscan", "ssh_audit", "smbmap", "smtp_user_enum", "searchsploit", "john"},
 		},
 		ReportTemplate: "ctf",
 	},
