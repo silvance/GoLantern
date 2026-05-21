@@ -35,10 +35,13 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "scope", label: "Scope" },
   { key: "runs", label: "Runs" },
+  // Ingest sits next to Runs because they're sibling fact-producers:
+  // an automated scan or a manual paste of post-foothold output. Both
+  // land in Findings / Entities downstream.
+  { key: "ingest", label: "Ingest" },
   { key: "findings", label: "Findings" },
   { key: "entities", label: "Entities" },
   { key: "artifacts", label: "Artifacts" },
-  { key: "ingest", label: "Ingest" },
   { key: "assistant", label: "Assistant" },
   { key: "audit", label: "Audit" },
 ];

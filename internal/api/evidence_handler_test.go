@@ -155,6 +155,41 @@ func TestEvidenceIngestUnknownProject(t *testing.T) {
 	}
 }
 
+func TestEvidenceIngestWritesAuditRow(t *testing.T) {
+	ts, st, p := newEvidenceServer(t)
+	body, _ := json.Marshal(map[string]any{
+		"tool":    "linpeas",
+		"target":  "10.0.0.5",
+		"content": "(root) NOPASSWD: /usr/bin/find\n",
+		"notes":   "post-foothold paste",
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/projects/"+p.ID+"/evidence/ingest",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	logs, _ := st.Audit.ListByProject(context.Background(), p.ID)
+	var hit bool
+	for _, l := range logs {
+		if l.Action == "evidence.ingested" {
+			hit = true
+			if l.Target != "linpeas" {
+				t.Errorf("audit Target = %q; want linpeas", l.Target)
+			}
+			if l.Detail["target"] != "10.0.0.5" {
+				t.Errorf("audit Detail.target = %v; want 10.0.0.5", l.Detail["target"])
+			}
+			if l.Detail["notes"] != "post-foothold paste" {
+				t.Errorf("audit Detail.notes lost: %v", l.Detail)
+			}
+		}
+	}
+	if !hit {
+		t.Fatalf("evidence.ingested audit row missing; got %+v", logs)
+	}
+}
+
 func TestEvidenceParsersNotConfigured(t *testing.T) {
 	// Server without EvidenceParsers set — list endpoint returns 501.
 	st := memory.New()

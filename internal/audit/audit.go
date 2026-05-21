@@ -29,6 +29,7 @@ const (
 	ActionProjectDeleted   = "project.deleted"
 	ActionRunCreated       = "run.created"
 	ActionRunFinished      = "run.finished"
+	ActionEvidenceIngested = "evidence.ingested"
 )
 
 // LogEntry is one row of the audit trail. Detail is intentionally a

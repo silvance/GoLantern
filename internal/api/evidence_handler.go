@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/silvance/golantern/internal/audit"
 	"github.com/silvance/golantern/internal/entity"
 	"github.com/silvance/golantern/internal/evidence"
 	"github.com/silvance/golantern/internal/finding"
@@ -59,7 +61,8 @@ func (s *Server) handleEvidenceIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	// Confirm project exists so the operator gets a clean 404 instead
 	// of orphan rows in the store.
-	if _, err := s.Projects.Get(r.Context(), projectID); err != nil {
+	proj, err := s.Projects.Get(r.Context(), projectID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, errorBody(fmt.Sprintf("project %q not found", projectID)))
 		return
 	}
@@ -104,6 +107,30 @@ func (s *Server) handleEvidenceIngest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorBody("persist failed: "+err.Error()))
 		return
 	}
+
+	// Append-only audit row so the operator can review who ingested
+	// what without scanning every evidence row. Mirrors the
+	// project-created / run-created records elsewhere in this file.
+	if err := s.Audit.Record(r.Context(), &audit.LogEntry{
+		ProjectID:           projectID,
+		ProjectNameSnapshot: proj.Name,
+		Action:              audit.ActionEvidenceIngested,
+		Target:              parser.Name(),
+		Detail: map[string]any{
+			"tool":             parser.Name(),
+			"target":           req.Target,
+			"entities_emitted": persisted.EntitiesEmitted,
+			"findings_emitted": persisted.FindingsEmitted,
+			"evidence_emitted": persisted.EvidenceEmitted,
+			"raw_length":       len(req.Content),
+			"notes":            req.Notes,
+		},
+	}); err != nil {
+		s.Logger.WarnContext(r.Context(), "audit record failed",
+			slog.String("action", audit.ActionEvidenceIngested),
+			slog.Any("err", err))
+	}
+
 	writeJSON(w, http.StatusCreated, persisted)
 }
 
