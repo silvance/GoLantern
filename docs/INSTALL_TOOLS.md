@@ -34,6 +34,11 @@ go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+go install github.com/projectdiscovery/katana/cmd/katana@latest
+go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest
+go install -v github.com/owasp-amass/amass/v4/...@master
+go install github.com/sa7mon/s3scanner@latest
 go install github.com/ffuf/ffuf/v2@latest
 go install github.com/tomnomnom/waybackurls@latest
 go install github.com/sensepost/gowitness@latest
@@ -53,10 +58,22 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 | `dnsx` | `dnsx` collector |
 | `httpx` | `httpx_probe` collector |
 | `nuclei` | `nuclei` collector |
+| `naabu` | `naabu` collector |
+| `katana` | `katana` collector |
+| `tlsx` | `tlsx` collector |
+| `amass` | `amass` collector |
+| `s3scanner` | `cloud_bucket` collector |
 | `ffuf` | `ffuf` collector |
 | `waybackurls` | `historical_urls` collector (default binary) |
 | `gowitness` | `gowitness` collector |
 | `trufflehog` | `trufflehog` collector |
+
+`naabu` needs raw-socket capability for SYN scanning. Either run it
+as root or grant the capability once:
+
+```sh
+sudo setcap cap_net_raw,cap_net_admin=eip "$(go env GOPATH)/bin/naabu"
+```
 
 After `nuclei` is installed, update its template set once:
 
@@ -85,6 +102,22 @@ on `$PATH`.
 | `theHarvester` | `theHarvester` | `theharvester` collector |
 | `sherlock` | `sherlock-project` | `sherlock` collector |
 | `smbmap` | `smbmap` | `smbmap` collector |
+
+## Ruby gem — wpscan
+
+`wpscan` is a Ruby project, easiest via gem:
+
+```sh
+sudo dnf install ruby ruby-devel gcc-c++ patch readline readline-devel \
+    zlib zlib-devel libffi-devel openssl-devel libyaml-devel make \
+    libxml2-devel libxslt-devel
+sudo gem install wpscan
+wpscan --version
+```
+
+For enriched vulnerability data, register a free WPScan API token at
+https://wpscan.com and pass it via `parameters["api_token"]` on each
+run (or wire it through your env).
 
 ## Tools that aren't packaged — install from git
 

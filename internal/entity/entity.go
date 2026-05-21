@@ -86,13 +86,14 @@ const (
 	KindService      Kind = "service"
 	KindOrganization Kind = "organization"
 	KindRepository   Kind = "repository"
+	KindCloudBucket  Kind = "cloud_bucket"
 )
 
 // allKinds is used only by Valid; keep in sync with the const block.
 var allKinds = []Kind{
 	KindDomain, KindSubdomain, KindIP, KindURL, KindEmail, KindPerson,
 	KindDocument, KindTechnology, KindPort, KindService, KindOrganization,
-	KindRepository,
+	KindRepository, KindCloudBucket,
 }
 
 func (k Kind) Valid() bool {
@@ -180,6 +181,12 @@ func Canonicalize(kind Kind, value string) string {
 		return canonicalizeURL(raw)
 	case KindRepository:
 		return canonicalizeRepo(raw)
+	case KindCloudBucket:
+		// Bucket URIs are stored lowercase. We don't try to normalize
+		// region or path beyond casing — the provider (s3/gs/azure) is
+		// part of the value and case-sensitive providers don't exist
+		// in practice for the bucket name component.
+		return strings.ToLower(raw)
 	}
 	return raw
 }

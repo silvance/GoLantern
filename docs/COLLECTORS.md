@@ -1,15 +1,19 @@
 # Collectors
 
-GoLantern ports 21 collectors from the Python codebase. The full set
-covers the LCVA workflow phases the Python service implemented:
+GoLantern ships 27 collectors covering the LCVA workflow phases:
 
 | Phase | Collectors |
 |---|---|
 | OSINT | `theharvester`, `sherlock`, `fixture` |
-| Asset Discovery | `crtsh`, `subfinder`, `historical_urls`, `github_repos` |
-| Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `ffuf`, `smbmap` |
-| Exposure | `nuclei`, `nikto`, `testssl`, `email_security` |
-| Enrichment | `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
+| Asset Discovery | `crtsh`, `subfinder`, `amass`, `historical_urls`, `github_repos` |
+| Validation | `dnsx`, `httpx_probe`, `gowitness`, `nmap`, `naabu`, `ffuf`, `smbmap` |
+| Exposure | `nuclei`, `katana`, `nikto`, `testssl`, `wpscan`, `email_security` |
+| Enrichment | `tlsx`, `cloud_bucket`, `shodan`, `censys`, `hibp`, `trufflehog`, `exiftool` |
+
+21 of these were ported from the Python lantern codebase; 6 are new
+additions that close gaps in the Python set (modern web crawling,
+fast port discovery, cross-source subdomain correlation, TLS-cert
+SAN extraction, WordPress audit, and open cloud-bucket discovery).
 
 ## How collectors are organized
 
@@ -38,7 +42,7 @@ clean Go equivalent.
 
 | Python collector | Why skipped | Reach the same outcome via |
 |---|---|---|
-| `gobuster`, `feroxbuster`, `katana` | Web-content brute force; same shape as `ffuf` (wordlist + URL template + JSON-ish output). | `ffuf` (operators who need a different binary can swap it via the `binary` parameter — the wrapper accepts compatible JSON output shapes). |
+| `gobuster`, `feroxbuster` | Web-content brute force; same shape as `ffuf` (wordlist + URL template + JSON-ish output). | `ffuf` (operators who need a different binary can swap it via the `binary` parameter — the wrapper accepts compatible JSON output shapes). |
 | `gau` | Wayback / Common Crawl URL discovery. Sister tool to waybackurls with identical "domain in, URL line out" contract. | `historical_urls` with `binary=gau`. |
 | `sslscan` | TLS posture; output shape is a subset of testssl's. | `testssl`. |
 | `kerbrute` | Kerberos pre-auth username enumeration. | `smbmap` covers the SMB-side enum; Kerberos-specific brute is a niche we'd add back when a real engagement needs it. |

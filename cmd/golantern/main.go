@@ -27,7 +27,9 @@ import (
 	"github.com/silvance/golantern/internal/project"
 	"github.com/silvance/golantern/internal/run"
 	"github.com/silvance/golantern/internal/scan"
+	"github.com/silvance/golantern/internal/scan/collectors/amass"
 	"github.com/silvance/golantern/internal/scan/collectors/censys"
+	"github.com/silvance/golantern/internal/scan/collectors/cloudbucket"
 	"github.com/silvance/golantern/internal/scan/collectors/crtsh"
 	"github.com/silvance/golantern/internal/scan/collectors/dnsx"
 	"github.com/silvance/golantern/internal/scan/collectors/emailsec"
@@ -39,6 +41,8 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/hibp"
 	"github.com/silvance/golantern/internal/scan/collectors/historicalurls"
 	"github.com/silvance/golantern/internal/scan/collectors/httpxprobe"
+	"github.com/silvance/golantern/internal/scan/collectors/katana"
+	"github.com/silvance/golantern/internal/scan/collectors/naabu"
 	"github.com/silvance/golantern/internal/scan/collectors/nikto"
 	"github.com/silvance/golantern/internal/scan/collectors/nmap"
 	"github.com/silvance/golantern/internal/scan/collectors/nuclei"
@@ -48,7 +52,9 @@ import (
 	"github.com/silvance/golantern/internal/scan/collectors/subfinder"
 	"github.com/silvance/golantern/internal/scan/collectors/testssl"
 	"github.com/silvance/golantern/internal/scan/collectors/theharvester"
+	"github.com/silvance/golantern/internal/scan/collectors/tlsx"
 	"github.com/silvance/golantern/internal/scan/collectors/trufflehog"
+	"github.com/silvance/golantern/internal/scan/collectors/wpscan"
 	"github.com/silvance/golantern/internal/scope"
 	"github.com/silvance/golantern/internal/store/memory"
 	"github.com/silvance/golantern/internal/store/sqlite"
@@ -122,7 +128,9 @@ func cmdServe(args []string) error {
 	// get wired; new collectors register here as they land.
 	reg := scan.NewRegistry()
 	reg.Register(fixture.Name, fixture.New)
+	reg.Register(amass.Name, amass.New)
 	reg.Register(censys.Name, censys.New)
+	reg.Register(cloudbucket.Name, cloudbucket.New)
 	reg.Register(crtsh.Name, crtsh.New)
 	reg.Register(dnsx.Name, dnsx.New)
 	reg.Register(emailsec.Name, emailsec.New)
@@ -133,6 +141,8 @@ func cmdServe(args []string) error {
 	reg.Register(hibp.Name, hibp.New)
 	reg.Register(historicalurls.Name, historicalurls.New)
 	reg.Register(httpxprobe.Name, httpxprobe.New)
+	reg.Register(katana.Name, katana.New)
+	reg.Register(naabu.Name, naabu.New)
 	reg.Register(nikto.Name, nikto.New)
 	reg.Register(nmap.Name, nmap.New)
 	reg.Register(nuclei.Name, nuclei.New)
@@ -142,7 +152,9 @@ func cmdServe(args []string) error {
 	reg.Register(subfinder.Name, subfinder.New)
 	reg.Register(testssl.Name, testssl.New)
 	reg.Register(theharvester.Name, theharvester.New)
+	reg.Register(tlsx.Name, tlsx.New)
 	reg.Register(trufflehog.Name, trufflehog.New)
+	reg.Register(wpscan.Name, wpscan.New)
 
 	// Queue + run-level orchestrator. The queue takes a Handler that
 	// closes over engine.ExecuteRun so the queue package keeps no
