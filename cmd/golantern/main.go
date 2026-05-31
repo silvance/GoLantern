@@ -7,10 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -86,11 +90,18 @@ func main() {
 
 func run_(args []string) error {
 	if len(args) == 0 {
-		return usage()
+		// Bare invocation = `up`. Operators who want help can still
+		// type `golantern help`; the explicit `serve` and `up`
+		// subcommands stay first-class for scripts that need them.
+		return cmdServe([]string{"--open"})
 	}
 	switch args[0] {
 	case "serve":
 		return cmdServe(args[1:])
+	case "up":
+		// `up` is `serve --open` — start the API and open the SPA
+		// in the default browser as soon as the listener is ready.
+		return cmdServe(append([]string{"--open"}, args[1:]...))
 	case "help", "-h", "--help":
 		return usage()
 	default:
@@ -102,8 +113,11 @@ func usage() error {
 	fmt.Println(`golantern - workflow engine for LCVA / OSINT-driven attack-surface discovery
 
 Subcommands:
-  serve     Start the HTTP API.
+  up        Start the HTTP API and open the SPA in your browser (default).
+  serve     Start the HTTP API without launching a browser.
+  help      Show this help.
 
+Bare 'golantern' with no args is equivalent to 'golantern up'.
 Run 'golantern serve --help' for flags.`)
 	return nil
 }
@@ -128,6 +142,7 @@ func cmdServe(args []string) error {
 	demo := fs.Bool("seed-demo", false, "preload a demo project before serving")
 	workers := fs.Int("workers", 2, "number of scan-engine workers")
 	artifactsDir := fs.String("artifacts-dir", "", "directory for artifact bytes; empty disables artifact storage")
+	open := fs.Bool("open", false, "open the SPA in the default browser once the server is listening")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -308,6 +323,26 @@ func cmdServe(args []string) error {
 		errCh <- nil
 	}()
 
+	// Browser launch is best-effort: we wait until the listener
+	// answers a TCP dial, then shell out to the platform's
+	// "open this URL" helper. Failures are logged at warn level
+	// and never fail the run — the server URL is still printed.
+	if *open {
+		go func() {
+			url := spaURL(*addr)
+			if err := waitForServer(*addr, 5*time.Second); err != nil {
+				logger.Warn("server not reachable; not opening browser",
+					slog.String("url", url), slog.Any("err", err))
+				return
+			}
+			fmt.Println("→ SPA ready at", url)
+			if err := openInBrowser(url); err != nil {
+				logger.Warn("could not open browser",
+					slog.String("url", url), slog.Any("err", err))
+			}
+		}()
+	}
+
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
@@ -435,4 +470,70 @@ func parseEnvInt(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// spaURL formats the listen address as a browser-openable URL.
+// `0.0.0.0` and `::` aren't routable from a user-agent — substitute
+// 127.0.0.1 so the operator's browser actually reaches the server
+// when they bind to all interfaces for remote access.
+func spaURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// Fall back to using whatever was passed verbatim; better an
+		// odd URL than refusing to print one.
+		return "http://" + addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return "http://" + host + ":" + port
+}
+
+// waitForServer dials the listener until it accepts a connection or
+// the deadline expires. Used by the --open path so we don't shell
+// out to xdg-open before the SPA can answer.
+func waitForServer(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("dial %s: %w", addr, lastErr)
+	}
+	return fmt.Errorf("dial %s timed out after %s", addr, timeout)
+}
+
+// openInBrowser shells out to the platform's URL-handler so the
+// operator doesn't have to copy-paste the listen address. Best
+// effort: returns an error if the platform isn't recognized or the
+// helper isn't on PATH (xdg-open is typically present on Linux
+// desktops but absent on headless servers — in which case we just
+// log and continue).
+func openInBrowser(url string) error {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "linux":
+		cmd = "xdg-open"
+		args = []string{url}
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	case "windows":
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
+	default:
+		return fmt.Errorf("openInBrowser: unsupported OS %q", runtime.GOOS)
+	}
+	return exec.Command(cmd, args...).Start()
 }

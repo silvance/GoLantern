@@ -105,17 +105,27 @@ each tool is on `$PATH`.
 
 ### Start the server
 
-The simplest invocation:
+One-keystroke launch:
 
 ```sh
-./golantern serve
+./golantern
 ```
 
-That binds to `127.0.0.1:8000` with an in-memory store (everything
-disappears on restart — fine for a tour, useless for real work). Hit
-`Ctrl-C` to stop; the queue drains gracefully.
+That's equivalent to `./golantern up` — starts the API on
+`127.0.0.1:8000` with an in-memory store and opens the SPA in your
+default browser as soon as the listener is ready. Hit `Ctrl-C` to
+stop; the queue drains gracefully.
 
-Open `http://127.0.0.1:8000/` in a browser for the web UI — project
+If you want the server without the browser-open (e.g. running on a
+headless box or under a systemd unit), use `./golantern serve`
+instead. `serve` accepts the same flags as `up` minus the
+`--open` toggle:
+
+```sh
+./golantern serve --addr 0.0.0.0:8000 --db golantern.db --workers 4
+```
+
+Either way, the web UI lives at `http://127.0.0.1:8000/` — project
 list, scope editor, runs with live SSE feed, findings, entities,
 artifact thumbnails, audit log, LLM assistant, doctor view, and
 report downloads (PDF / DOCX / HTML / CSV / JSON). Or use
